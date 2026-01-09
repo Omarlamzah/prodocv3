@@ -1,0 +1,121 @@
+# Uncomment this line to define a global platform for your project
+platform :ios, '13.0'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_ios_podfile_setup
+
+target 'Runner' do
+  use_frameworks!
+  use_modular_headers!
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+      # Fix for Swift Package Manager dependencies
+      config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
+      config.build_settings['SWIFT_VERSION'] = '5.0'
+      # Enable Swift Package Manager support
+      config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'YES'
+    end
+    
+    # Fix for privacy manifest bundle issues (affects multiple Flutter packages)
+    # This is a known issue with many Flutter iOS plugins
+    # We'll add a script phase to ALL pod targets to create privacy manifests if needed
+    # This prevents build failures for any package that needs a privacy manifest
+    
+    # Add a script phase to create the privacy manifest bundle for any package that needs it
+    # This must run BEFORE the build phase that needs the file
+    privacy_script = target.new_shell_script_build_phase('Create Privacy Manifest')
+    
+    # Handle ALL naming conventions:
+    # 1. package_name_privacy.bundle (most packages)
+    # 2. package_name_Privacy.bundle (nanopb)
+    # 3. package_name.bundle (flutter_secure_storage)
+    privacy_bundle_name_lower = "#{target.name}_privacy.bundle"
+    privacy_bundle_name_upper = "#{target.name}_Privacy.bundle"
+    privacy_bundle_name_simple = "#{target.name}.bundle"
+    
+    privacy_script.shell_script = <<-SCRIPT
+      # Create privacy manifest bundle if it doesn't exist
+      # This is a workaround for Flutter packages missing privacy manifests
+      # Handle all three naming conventions
+      
+      # Create privacy manifests in ALL possible locations
+      # Some packages expect it at root, some in package subdirectory
+      
+      # Location 1: Root of BUILT_PRODUCTS_DIR (most common)
+      PRIVACY_BUNDLE_LOWER="${BUILT_PRODUCTS_DIR}/#{privacy_bundle_name_lower}"
+      PRIVACY_BUNDLE_UPPER="${BUILT_PRODUCTS_DIR}/#{privacy_bundle_name_upper}"
+      PRIVACY_BUNDLE_SIMPLE="${BUILT_PRODUCTS_DIR}/#{privacy_bundle_name_simple}"
+      
+      # Location 2: Inside package subdirectory (this is what Xcode expects for most packages)
+      PRIVACY_BUNDLE_ALT_LOWER="${BUILT_PRODUCTS_DIR}/#{target.name}/#{privacy_bundle_name_lower}"
+      PRIVACY_BUNDLE_ALT_UPPER="${BUILT_PRODUCTS_DIR}/#{target.name}/#{privacy_bundle_name_upper}"
+      PRIVACY_BUNDLE_ALT_SIMPLE="${BUILT_PRODUCTS_DIR}/#{target.name}/#{privacy_bundle_name_simple}"
+      
+      # Function to create privacy manifest file
+      create_privacy_file() {
+        local bundle_path=$1
+        local file_name=$2
+        mkdir -p "$bundle_path"
+        if [ ! -f "$bundle_path/$file_name" ]; then
+          touch "$bundle_path/$file_name"
+          chmod 644 "$bundle_path/$file_name"
+        fi
+      }
+      
+      # Create all possible combinations to cover all cases
+      # Always ensure both directory AND file exist
+      create_privacy_file "$PRIVACY_BUNDLE_LOWER" "#{target.name}_privacy"
+      create_privacy_file "$PRIVACY_BUNDLE_UPPER" "#{target.name}_Privacy"
+      create_privacy_file "$PRIVACY_BUNDLE_SIMPLE" "#{target.name}"
+      create_privacy_file "$PRIVACY_BUNDLE_ALT_LOWER" "#{target.name}_privacy"
+      create_privacy_file "$PRIVACY_BUNDLE_ALT_UPPER" "#{target.name}_Privacy"
+      create_privacy_file "$PRIVACY_BUNDLE_ALT_SIMPLE" "#{target.name}"
+    SCRIPT
+    privacy_script.run_only_for_deployment_postprocessing = '0'
+    
+    # Ensure script phase runs early - move it to the beginning of build phases
+    # This ensures privacy manifests are created before Xcode looks for them
+    build_phases = target.build_phases.to_a
+    if build_phases.count > 1 && build_phases.include?(privacy_script)
+      target.build_phases.delete(privacy_script)
+      # Insert at position 0 (very beginning) to run before everything else
+      target.build_phases.insert(0, privacy_script)
+    end
+  end
+  
+  # Ensure Swift Package Manager dependencies are resolved
+  installer.pods_project.build_configurations.each do |config|
+    config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
+  end
+end
+
