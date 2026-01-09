@@ -78,8 +78,8 @@ dependencies:
   device_preview: ^1.3.1
   record: ^6.1.2
   permission_handler: ^11.3.1
-  google_mlkit_text_recognition: ^0.13.0
-  google_mlkit_face_detection: ^0.11.0
+  google_mlkit_text_recognition: ^0.15.0
+  google_mlkit_face_detection: ^0.13.1
   camera: ^0.11.0+2
   manual_speech_to_text: ^1.0.4
   font_awesome_flutter: ^10.12.0
