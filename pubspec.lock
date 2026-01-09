@@ -689,10 +689,10 @@ packages:
     dependency: "direct main"
     description:
       name: google_mlkit_text_recognition
-      sha256: "98f7f52bb04d39e2cdc855f7d037906b3e45cc76a30725bd95f7e474adf43c85"
+      sha256: "89c848329355f165ff17ca8645cab5998770e9e25e431fe6dd8261ed9cf7bdc4"
       url: "https://pub.dev"
     source: hosted
-    version: "0.12.1"
+    version: "0.13.0"
   google_sign_in:
     dependency: "direct main"
     description:
