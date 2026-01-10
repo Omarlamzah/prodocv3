@@ -187,6 +187,7 @@ post_install do |installer|
   
   # Create placeholder privacy manifest files after pod install
   # This ensures they exist before Xcode checks for them as build inputs
+  require 'fileutils'
   puts "Creating placeholder privacy manifest files..."
   privacy_packages = ['url_launcher_ios', 'sqflite_darwin', 'shared_preferences_foundation', 
                       'path_provider_foundation', 'flutter_secure_storage', 
