@@ -34,10 +34,14 @@ final specialtyFieldsProvider = FutureProvider.autoDispose
 });
 
 // State Notifier for managing specialty operations
-class SpecialtyNotifier extends StateNotifier<AsyncValue<Result<String>>> {
-  final SpecialtyService _service;
+class SpecialtyNotifier extends Notifier<AsyncValue<Result<String>>> {
+  late SpecialtyService _service;
 
-  SpecialtyNotifier(this._service) : super(const AsyncValue.data(Success('')));
+  @override
+  AsyncValue<Result<String>> build() {
+    _service = ref.watch(specialtyServiceProvider);
+    return const AsyncValue.data(Success(''));
+  }
 
   Future<void> createSpecialty({
     required String name,
@@ -107,18 +111,18 @@ class SpecialtyNotifier extends StateNotifier<AsyncValue<Result<String>>> {
   }
 }
 
-final specialtyNotifierProvider = StateNotifierProvider.autoDispose<
-    SpecialtyNotifier, AsyncValue<Result<String>>>((ref) {
-  final service = ref.watch(specialtyServiceProvider);
-  return SpecialtyNotifier(service);
-});
+final specialtyNotifierProvider = NotifierProvider.autoDispose<
+    SpecialtyNotifier, AsyncValue<Result<String>>>(SpecialtyNotifier.new);
 
 // State Notifier for managing specialty field operations
-class SpecialtyFieldNotifier extends StateNotifier<AsyncValue<Result<String>>> {
-  final SpecialtyService _service;
+class SpecialtyFieldNotifier extends Notifier<AsyncValue<Result<String>>> {
+  late SpecialtyService _service;
 
-  SpecialtyFieldNotifier(this._service)
-      : super(const AsyncValue.data(Success('')));
+  @override
+  AsyncValue<Result<String>> build() {
+    _service = ref.watch(specialtyServiceProvider);
+    return const AsyncValue.data(Success(''));
+  }
 
   Future<void> createField({
     required int specialtyId,
@@ -216,8 +220,5 @@ class SpecialtyFieldNotifier extends StateNotifier<AsyncValue<Result<String>>> {
   }
 }
 
-final specialtyFieldNotifierProvider = StateNotifierProvider.autoDispose<
-    SpecialtyFieldNotifier, AsyncValue<Result<String>>>((ref) {
-  final service = ref.watch(specialtyServiceProvider);
-  return SpecialtyFieldNotifier(service);
-});
+final specialtyFieldNotifierProvider = NotifierProvider.autoDispose<
+    SpecialtyFieldNotifier, AsyncValue<Result<String>>>(SpecialtyFieldNotifier.new);

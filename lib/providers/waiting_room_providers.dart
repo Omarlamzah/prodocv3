@@ -19,7 +19,14 @@ final waitingRoomProvider =
 });
 
 // Refresh provider for manual refresh
-final waitingRoomRefreshProvider = StateProvider<int>((ref) => 0);
+final waitingRoomRefreshProvider = NotifierProvider<WaitingRoomRefreshNotifier, int>(WaitingRoomRefreshNotifier.new);
+
+class WaitingRoomRefreshNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void refresh() => state++;
+}
 
 // Auto-refresh provider that refreshes every 2 minutes
 final waitingRoomAutoRefreshProvider =

@@ -131,9 +131,9 @@ class ReportFilters {
   }
 }
 
-class ReportFiltersNotifier extends StateNotifier<ReportFilters> {
-  ReportFiltersNotifier()
-      : super(const ReportFilters(reportType: 'appointments'));
+class ReportFiltersNotifier extends Notifier<ReportFilters> {
+  @override
+  ReportFilters build() => const ReportFilters(reportType: 'appointments');
 
   void setReportType(String reportType) {
     state = ReportFilters(reportType: reportType);
@@ -200,8 +200,8 @@ class ReportFiltersNotifier extends StateNotifier<ReportFilters> {
 }
 
 final reportFiltersProvider =
-    StateNotifierProvider<ReportFiltersNotifier, ReportFilters>(
-  (ref) => ReportFiltersNotifier(),
+    NotifierProvider<ReportFiltersNotifier, ReportFilters>(
+  ReportFiltersNotifier.new,
 );
 
 final reportDataProvider = FutureProvider.autoDispose

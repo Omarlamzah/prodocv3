@@ -8,7 +8,14 @@ import '../l10n/app_localizations.dart';
 import 'login_screen.dart';
 import 'public_appointment_booking_screen.dart';
 
-final tenantSearchQueryProvider = StateProvider<String>((ref) => '');
+final tenantSearchQueryProvider = NotifierProvider<TenantSearchQueryNotifier, String>(TenantSearchQueryNotifier.new);
+
+class TenantSearchQueryNotifier extends Notifier<String> {
+  @override
+  String build() => '';
+  
+  void update(String value) => state = value;
+}
 
 class TenantSelectionScreen extends ConsumerStatefulWidget {
   const TenantSelectionScreen({super.key});
@@ -315,7 +322,7 @@ class _TenantSelectionScreenState extends ConsumerState<TenantSelectionScreen>
                                     ref
                                         .read(
                                             tenantSearchQueryProvider.notifier)
-                                        .state = '';
+                                        .update('');
                                   },
                                 )
                               : null,
@@ -331,8 +338,8 @@ class _TenantSelectionScreenState extends ConsumerState<TenantSelectionScreen>
                           ),
                         ),
                         onChanged: (value) {
-                          ref.read(tenantSearchQueryProvider.notifier).state =
-                              value;
+                          ref.read(tenantSearchQueryProvider.notifier).update(
+                              value);
                         },
                       ),
                     )
@@ -700,8 +707,7 @@ class _TenantSelectionScreenState extends ConsumerState<TenantSelectionScreen>
                         primaryColor,
                         () {
                           _searchController.clear();
-                          ref.read(tenantSearchQueryProvider.notifier).state =
-                              '';
+                          ref.read(tenantSearchQueryProvider.notifier).update('');
                         },
                         isOutlined: true,
                       );

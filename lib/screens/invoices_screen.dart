@@ -6,6 +6,7 @@ import '../providers/api_providers.dart';
 import '../providers/auth_providers.dart';
 import '../l10n/app_localizations.dart';
 import 'create_invoice_screen.dart';
+import 'create_invoice_screen_nextjs.dart';
 import 'invoice_detail_screen.dart';
 
 class InvoicesScreen extends ConsumerStatefulWidget {

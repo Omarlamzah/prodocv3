@@ -13,7 +13,14 @@ final dashboardServiceProvider = Provider<DashboardService>((ref) {
 });
 
 // Time Range Provider
-final timeRangeProvider = StateProvider<String>((ref) => 'day');
+// Time Range Provider
+class TimeRangeNotifier extends Notifier<String> {
+  @override
+  String build() => 'day';
+  
+  void update(String value) => state = value;
+}
+final timeRangeProvider = NotifierProvider<TimeRangeNotifier, String>(TimeRangeNotifier.new);
 
 // Dashboard Data Provider - Returns Result type to match your existing code
 final dashboardDataProvider = FutureProvider.autoDispose

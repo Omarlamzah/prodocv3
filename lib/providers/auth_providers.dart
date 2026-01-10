@@ -54,17 +54,26 @@ final authServiceProvider = Provider<AuthService>((ref) {
 });
 
 // Auth State Notifier
-class AuthNotifier extends StateNotifier<AuthState> {
-  final AuthService _authService;
-  final StorageService _storageService;
-  final ApiClient _apiClient;
+class AuthNotifier extends Notifier<AuthState> {
+  late AuthService _authService;
+  late StorageService _storageService;
+  late ApiClient _apiClient;
 
-  AuthNotifier(this._authService, this._storageService, this._apiClient)
-      : super(AuthState()) {
-    _checkAuth();
+  @override
+  AuthState build() {
+    _authService = ref.watch(authServiceProvider);
+    _storageService = ref.watch(storageServiceProvider);
+    _apiClient = ref.watch(apiClientProvider);
+    
+    // Trigger initial check
+    Future.microtask(() => _checkAuth());
+    
+    return AuthState();
   }
 
   Future<void> _checkAuth() async {
+    // Avoid double loading if already loading
+    if (state.isLoading) return;
     state = state.copyWith(isLoading: true);
 
     final token = await _storageService.getToken();
@@ -219,18 +228,20 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
     try {
       // Use Firebase Auth for Google Sign-In
-      // Firebase Auth automatically handles OAuth using google-services.json
-      // Uses the web client ID from google-services.json automatically
       final FirebaseAuth auth = FirebaseAuth.instance;
 
-      // Create Google Sign-In instance - Firebase will use google-services.json config
-      // No need to specify serverClientId - Firebase handles it automatically
-      final googleSignIn = GoogleSignIn(
-        scopes: ['email', 'profile'],
+      // In google_sign_in v7.x, use GoogleSignIn.instance singleton
+      // and call initialize() before authenticate()
+      final googleSignIn = GoogleSignIn.instance;
+      
+      // Initialize with serverClientId (Web client ID from google-services.json)
+      // This is REQUIRED on Android
+      await googleSignIn.initialize(
+        serverClientId: '1048263640434-3updimfp5414dn6ubphntsstok4gjb1u.apps.googleusercontent.com',
       );
 
       // Trigger the authentication flow
-      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+      final GoogleSignInAccount? googleUser = await googleSignIn.authenticate(); 
 
       if (googleUser == null) {
         // User cancelled the sign-in
@@ -247,8 +258,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
       // Create a new credential
       final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
+        // accessToken is no longer directly available in GoogleSignInAuthentication in v7
+        // and is usually not strictly required for Firebase Auth if idToken is present.
+        // If API access is needed, explicit authorization flow is required.
+        accessToken: null,
       );
 
       // Sign in to Firebase with the Google credential
@@ -353,10 +367,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
         error: errorMessage,
       );
 
-      // Clean up Firebase auth state on error
       try {
         await FirebaseAuth.instance.signOut();
-        await GoogleSignIn().signOut();
+        await GoogleSignIn.instance.signOut();
       } catch (_) {
         // Ignore cleanup errors
       }
@@ -422,10 +435,4 @@ class AuthNotifier extends StateNotifier<AuthState> {
 }
 
 // Auth Provider
-final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
-  final authService = ref.watch(authServiceProvider);
-  final storageService = ref.watch(storageServiceProvider);
-  final apiClient = ref.watch(apiClientProvider);
-
-  return AuthNotifier(authService, storageService, apiClient);
-});
+final authProvider = NotifierProvider<AuthNotifier, AuthState>(AuthNotifier.new);

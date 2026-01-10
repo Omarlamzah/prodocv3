@@ -90,8 +90,9 @@ class MedicalRecordListState {
   }
 }
 
-class MedicalRecordListNotifier extends StateNotifier<MedicalRecordListState> {
-  MedicalRecordListNotifier() : super(const MedicalRecordListState());
+class MedicalRecordListNotifier extends Notifier<MedicalRecordListState> {
+  @override
+  MedicalRecordListState build() => const MedicalRecordListState();
 
   void setPage(int page) {
     state = state.copyWith(page: page);
@@ -126,8 +127,8 @@ class MedicalRecordListNotifier extends StateNotifier<MedicalRecordListState> {
 }
 
 final medicalRecordListStateProvider =
-    StateNotifierProvider<MedicalRecordListNotifier, MedicalRecordListState>(
-  (ref) => MedicalRecordListNotifier(),
+    NotifierProvider<MedicalRecordListNotifier, MedicalRecordListState>(
+  MedicalRecordListNotifier.new,
 );
 
 final medicalRecordListProvider = FutureProvider.autoDispose

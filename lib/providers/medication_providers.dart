@@ -40,8 +40,9 @@ class MedicationListFilters {
   int get hashCode => Object.hash(page, search);
 }
 
-class MedicationListFilterNotifier extends StateNotifier<MedicationListFilters> {
-  MedicationListFilterNotifier() : super(const MedicationListFilters());
+class MedicationListFilterNotifier extends Notifier<MedicationListFilters> {
+  @override
+  MedicationListFilters build() => const MedicationListFilters();
 
   void setPage(int page) {
     state = state.copyWith(page: page);
@@ -62,8 +63,8 @@ final medicationServiceProvider = Provider<MedicationService>((ref) {
 });
 
 final medicationListFiltersProvider =
-    StateNotifierProvider<MedicationListFilterNotifier, MedicationListFilters>(
-  (ref) => MedicationListFilterNotifier(),
+    NotifierProvider<MedicationListFilterNotifier, MedicationListFilters>(
+  MedicationListFilterNotifier.new,
 );
 
 final medicationListProvider = FutureProvider.autoDispose

@@ -18,18 +18,19 @@ final tenantServiceProvider = Provider<TenantService>((ref) {
   return TenantService(apiClient: apiClient);
 });
 
-// Selected Tenant State Provider
+// Selected Tenant state Provider
 final selectedTenantProvider =
-    StateNotifierProvider<SelectedTenantNotifier, TenantModel?>((ref) {
-  return SelectedTenantNotifier(ref.watch(storageServiceProvider));
-});
+    NotifierProvider<SelectedTenantNotifier, TenantModel?>(SelectedTenantNotifier.new);
 
-class SelectedTenantNotifier extends StateNotifier<TenantModel?> {
-  final StorageService _storageService;
+class SelectedTenantNotifier extends Notifier<TenantModel?> {
+  late StorageService _storageService;
   bool _isLoading = true;
 
-  SelectedTenantNotifier(this._storageService) : super(null) {
+  @override
+  TenantModel? build() {
+    _storageService = ref.watch(storageServiceProvider);
     _loadSavedTenant();
+    return null;
   }
 
   bool get isLoading => _isLoading;

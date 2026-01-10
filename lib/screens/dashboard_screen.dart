@@ -45,10 +45,18 @@ import '../widgets/subscription_expiration_dialog.dart';
 import 'cabinet_info_screen.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
-final dashboardFilterProvider = StateProvider<String>((ref) {
-  // This will be set dynamically based on locale
-  return 'All Doctors';
-});
+final dashboardFilterProvider = NotifierProvider<DashboardFilterNotifier, String>(DashboardFilterNotifier.new);
+
+class DashboardFilterNotifier extends Notifier<String> {
+  @override
+  String build() {
+    return 'All Doctors';
+  }
+  
+  void setFilter(String filter) {
+    state = filter;
+  }
+}
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -76,6 +84,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     if (value is List) return value;
     return [];
   }
+
+
 
   Future<void> _checkReviewPrompt() async {
     if (_hasCheckedReview) return;
@@ -428,7 +438,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             value: 'day',
             isSelected: timeRange == 'day',
             icon: Icons.today_rounded,
-            onTap: () => ref.read(timeRangeProvider.notifier).state = 'day',
+            onTap: () => ref.read(timeRangeProvider.notifier).update('day'),
             isSmall: isSmall,
             primaryColor: primaryColor,
             isDark: isDark,
@@ -440,7 +450,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             value: 'week',
             isSelected: timeRange == 'week',
             icon: Icons.date_range_rounded,
-            onTap: () => ref.read(timeRangeProvider.notifier).state = 'week',
+            onTap: () => ref.read(timeRangeProvider.notifier).update('week'),
             isSmall: isSmall,
             primaryColor: primaryColor,
             isDark: isDark,
@@ -452,7 +462,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             value: 'month',
             isSelected: timeRange == 'month',
             icon: Icons.calendar_month_rounded,
-            onTap: () => ref.read(timeRangeProvider.notifier).state = 'month',
+            onTap: () => ref.read(timeRangeProvider.notifier).update('month'),
             isSmall: isSmall,
             primaryColor: primaryColor,
             isDark: isDark,

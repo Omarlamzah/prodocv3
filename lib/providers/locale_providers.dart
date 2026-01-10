@@ -12,11 +12,13 @@ class LocaleState {
 }
 
 // Locale notifier
-class LocaleNotifier extends StateNotifier<LocaleState> {
+class LocaleNotifier extends Notifier<LocaleState> {
   static const String _localeKey = 'selected_locale';
 
-  LocaleNotifier() : super(LocaleState(const Locale('en', 'US'))) {
-    _loadLocale();
+  @override
+  LocaleState build() {
+    Future.microtask(() => _loadLocale());
+    return LocaleState(const Locale('en', 'US'));
   }
 
   Future<void> _loadLocale() async {
@@ -80,6 +82,4 @@ class LocaleNotifier extends StateNotifier<LocaleState> {
 
 // Locale provider
 final localeProvider =
-    StateNotifierProvider<LocaleNotifier, LocaleState>((ref) {
-  return LocaleNotifier();
-});
+    NotifierProvider<LocaleNotifier, LocaleState>(LocaleNotifier.new);

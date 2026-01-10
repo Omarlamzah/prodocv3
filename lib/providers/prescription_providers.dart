@@ -122,8 +122,9 @@ class PrescriptionListFilters {
 }
 
 class PrescriptionListFilterNotifier
-    extends StateNotifier<PrescriptionListFilters> {
-  PrescriptionListFilterNotifier() : super(const PrescriptionListFilters());
+    extends Notifier<PrescriptionListFilters> {
+  @override
+  PrescriptionListFilters build() => const PrescriptionListFilters();
 
   void setSearch(String? search) {
     state = state.copyWith(search: search, page: 1);
@@ -150,9 +151,9 @@ class PrescriptionListFilterNotifier
   }
 }
 
-final prescriptionListFiltersProvider = StateNotifierProvider<
+final prescriptionListFiltersProvider = NotifierProvider<
     PrescriptionListFilterNotifier, PrescriptionListFilters>(
-  (ref) => PrescriptionListFilterNotifier(),
+  PrescriptionListFilterNotifier.new,
 );
 
 final prescriptionListProvider = FutureProvider.autoDispose

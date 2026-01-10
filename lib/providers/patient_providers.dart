@@ -49,8 +49,9 @@ class PatientListFilters {
   int get hashCode => Object.hash(page, filter, sortColumn, sortDirection);
 }
 
-class PatientListFilterNotifier extends StateNotifier<PatientListFilters> {
-  PatientListFilterNotifier() : super(const PatientListFilters());
+class PatientListFilterNotifier extends Notifier<PatientListFilters> {
+  @override
+  PatientListFilters build() => const PatientListFilters();
 
   void setFilter(String filter) {
     state = state.copyWith(filter: filter, page: 1);
@@ -88,8 +89,8 @@ class PatientListFilterNotifier extends StateNotifier<PatientListFilters> {
 }
 
 final patientListFiltersProvider =
-    StateNotifierProvider<PatientListFilterNotifier, PatientListFilters>(
-  (ref) => PatientListFilterNotifier(),
+    NotifierProvider<PatientListFilterNotifier, PatientListFilters>(
+  PatientListFilterNotifier.new,
 );
 
 final patientListProvider = FutureProvider.autoDispose
