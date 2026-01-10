@@ -7,10 +7,8 @@ workflows:
       flutter: stable
       xcode: latest
       cocoapods: default
-      # groups:
-        # Add your environment variables group name here
-        # - app_store_credentials # Uncomment and configure in Codemagic UI
-        # Environment variables should be configured in Codemagic UI under Environment Variables
+      groups:
+        - app_store_credentials  # Your App Store Connect API key group
         
     # Cache configuration
     cache:
@@ -28,7 +26,17 @@ workflows:
     scripts:
       - name: Set up code signing settings on Xcode project
         script: |
+          # Set up code signing using App Store Connect API key
+          # Make sure you have configured the API key in Codemagic UI:
+          # Settings > Integrations > App Store Connect > Add API key
+          # Then add it to environment variables group: app_store_credentials
           xcode-project use-profiles
+          
+          # Verify code signing is set up
+          echo "Code signing configuration:"
+          cd ios
+          xcodebuild -showBuildSettings -workspace Runner.xcworkspace -scheme Runner | grep -i "CODE_SIGN\|PROVISIONING_PROFILE\|DEVELOPMENT_TEAM" || true
+          cd ..
           
       - name: Clean iOS build
         script: |
@@ -226,10 +234,11 @@ workflows:
           EOF
           chmod +x /tmp/create_privacy_manifests.sh
           
-          # Build IPA with export options
+          # Build IPA with code signing
+          # CodeMagic will handle code signing automatically if configured
           # Note: This will create an archive, which is where the privacy bundle error occurs
           # We'll monitor the build and create files if needed
-          (flutter build ipa --release --export-options-plist /Users/builder/export_options.plist 2>&1 | tee /tmp/flutter_build.log) || BUILD_FAILED=1
+          (flutter build ipa --release 2>&1 | tee /tmp/flutter_build.log) || BUILD_FAILED=1
           
           # If build failed due to privacy manifest, try to create files and retry once
           if [ "$BUILD_FAILED" = "1" ] && grep -qi "Build input file cannot be found.*privacy.*bundle" /tmp/flutter_build.log; then
@@ -237,7 +246,7 @@ workflows:
             /tmp/create_privacy_manifests.sh
             # Small delay to ensure files are written
             sleep 2
-            flutter build ipa --release --export-options-plist /Users/builder/export_options.plist 2>&1 | tee /tmp/flutter_build.log || BUILD_FAILED=1
+            flutter build ipa --release 2>&1 | tee /tmp/flutter_build.log || BUILD_FAILED=1
           fi
             
           if [ "$BUILD_FAILED" = "1" ]; then
@@ -330,11 +339,6 @@ workflows:
           echo "Build directory structure:"
           ls -la build/ios/ 2>/dev/null || echo "build/ios/ directory not found"
           
-      # Uncomment below if you have code signing configured
-      # - name: Build iOS IPA (with code signing)
-      #   script: |
-      #     flutter build ipa --release
-          
       # Optional: Run iOS tests
       # - name: Run iOS tests
       #   script: |
@@ -346,6 +350,7 @@ workflows:
       #       -enableCodeCoverage YES \
       #       | xcpretty
           
+        
     artifacts:
       - build/ios/Release-iphoneos/*.app
       - build/ios/iphoneos/*.app
