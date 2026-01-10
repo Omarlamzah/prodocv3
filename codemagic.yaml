@@ -198,9 +198,47 @@ workflows:
           # Create privacy manifests before build
           create_privacy_manifests
           
+          # Create a script that will create privacy manifests during the build
+          # This script will be called by Xcode build phases
+          cat > /tmp/create_privacy_manifests.sh << 'EOF'
+          #!/bin/bash
+          # Create privacy manifest files in DerivedData during build
+          PACKAGES="url_launcher_ios sqflite_darwin shared_preferences_foundation path_provider_foundation flutter_secure_storage flutter_local_notifications share_plus"
+          
+          # Try to find DerivedData directory
+          DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
+          if [ -d "$DERIVED_DATA_BASE" ]; then
+            # Find the most recent Runner-* directory
+            LATEST_DERIVED=$(ls -td "$DERIVED_DATA_BASE"/Runner-* 2>/dev/null | head -1)
+            if [ -n "$LATEST_DERIVED" ]; then
+              UNINSTALLED_DIR="${LATEST_DERIVED}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
+              mkdir -p "$UNINSTALLED_DIR"
+              
+              for pkg in $PACKAGES; do
+                BUNDLE_DIR="${UNINSTALLED_DIR}/${pkg}_privacy.bundle"
+                mkdir -p "$BUNDLE_DIR"
+                touch "${BUNDLE_DIR}/${pkg}_privacy"
+                chmod 644 "${BUNDLE_DIR}/${pkg}_privacy"
+                echo "Created: ${BUNDLE_DIR}/${pkg}_privacy"
+              done
+            fi
+          fi
+          EOF
+          chmod +x /tmp/create_privacy_manifests.sh
+          
           # Build IPA with export options
           # Note: This will create an archive, which is where the privacy bundle error occurs
-          flutter build ipa --release --export-options-plist /Users/builder/export_options.plist 2>&1 | tee /tmp/flutter_build.log || BUILD_FAILED=1
+          # We'll monitor the build and create files if needed
+          (flutter build ipa --release --export-options-plist /Users/builder/export_options.plist 2>&1 | tee /tmp/flutter_build.log) || BUILD_FAILED=1
+          
+          # If build failed due to privacy manifest, try to create files and retry once
+          if [ "$BUILD_FAILED" = "1" ] && grep -qi "Build input file cannot be found.*privacy.*bundle" /tmp/flutter_build.log; then
+            echo "Privacy manifest error detected, creating files and retrying..."
+            /tmp/create_privacy_manifests.sh
+            # Small delay to ensure files are written
+            sleep 2
+            flutter build ipa --release --export-options-plist /Users/builder/export_options.plist 2>&1 | tee /tmp/flutter_build.log || BUILD_FAILED=1
+          fi
             
           if [ "$BUILD_FAILED" = "1" ]; then
             echo "=========================================="

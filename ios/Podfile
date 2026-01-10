@@ -70,17 +70,33 @@ post_install do |installer|
         config.build_settings['ALWAYS_SEARCH_USER_PATHS'] = 'NO'
       end
       
-      # Remove any Copy Files phases that might reference the privacy manifest as an input
+      # Remove any file references that might cause Xcode to look for the privacy manifest as a build input
       target.build_phases.each do |phase|
         if phase.respond_to?(:files)
+          files_to_remove = []
           phase.files.to_a.each do |file|
             if file.respond_to?(:file_ref) && file.file_ref
-              file_name = file.file_ref.path rescue nil
-              if file_name && (file_name.include?('privacy') || file_name.end_with?('_privacy'))
-                phase.files.delete(file)
+              begin
+                file_name = file.file_ref.path rescue nil
+                if file_name && (file_name.include?('privacy') || file_name.end_with?('_privacy'))
+                  files_to_remove << file
+                end
+              rescue
+                # Ignore errors
               end
             end
           end
+          files_to_remove.each { |f| phase.files.delete(f) rescue nil }
+        end
+        
+        # Also check input file lists
+        if phase.respond_to?(:input_file_list_paths)
+          phase.input_file_list_paths = phase.input_file_list_paths.reject { |path| path.to_s.include?('privacy') } rescue nil
+        end
+        
+        # Check input paths
+        if phase.respond_to?(:input_paths)
+          phase.input_paths = phase.input_paths.reject { |path| path.to_s.include?('privacy') } rescue nil
         end
       end
       
@@ -167,6 +183,46 @@ post_install do |installer|
   installer.pods_project.build_configurations.each do |config|
     config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
     config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
+  end
+  
+  # Create placeholder privacy manifest files after pod install
+  # This ensures they exist before Xcode checks for them as build inputs
+  puts "Creating placeholder privacy manifest files..."
+  privacy_packages = ['url_launcher_ios', 'sqflite_darwin', 'shared_preferences_foundation', 
+                      'path_provider_foundation', 'flutter_secure_storage', 
+                      'flutter_local_notifications', 'share_plus']
+  
+  # Create in a location that will be used during build
+  build_dir = File.join(File.dirname(__FILE__), '..', 'build', 'ios', 'Release-iphoneos')
+  FileUtils.mkdir_p(build_dir) rescue nil
+  
+  privacy_packages.each do |pkg|
+    bundle_dir = File.join(build_dir, "#{pkg}_privacy.bundle")
+    FileUtils.mkdir_p(bundle_dir) rescue nil
+    manifest_file = File.join(bundle_dir, "#{pkg}_privacy")
+    FileUtils.touch(manifest_file) rescue nil
+    FileUtils.chmod(0644, manifest_file) rescue nil
+    puts "  Created placeholder: #{manifest_file}"
+  end
+  
+  # Also try to create in DerivedData if it exists
+  derived_data_base = File.join(Dir.home, 'Library', 'Developer', 'Xcode', 'DerivedData')
+  if File.directory?(derived_data_base)
+    Dir.glob(File.join(derived_data_base, 'Runner-*')).each do |derived_dir|
+      uninstalled_dir = File.join(derived_dir, 'Build', 'Intermediates.noindex', 
+                                  'ArchiveIntermediates', 'Runner', 
+                                  'IntermediateBuildFilesPath', 'UninstalledProducts', 'iphoneos')
+      if File.directory?(File.dirname(uninstalled_dir))
+        FileUtils.mkdir_p(uninstalled_dir) rescue nil
+        privacy_packages.each do |pkg|
+          bundle_dir = File.join(uninstalled_dir, "#{pkg}_privacy.bundle")
+          FileUtils.mkdir_p(bundle_dir) rescue nil
+          manifest_file = File.join(bundle_dir, "#{pkg}_privacy")
+          FileUtils.touch(manifest_file) rescue nil
+          FileUtils.chmod(0644, manifest_file) rescue nil
+        end
+      end
+    end
   end
 end
 
