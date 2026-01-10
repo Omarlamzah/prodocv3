@@ -43,12 +43,28 @@ workflows:
           echo ""
           
           # Use xcode-project to set up code signing automatically
-          # This command should use the App Store Connect API key from integrations
+          # This command uses the App Store Connect API key from the integrations section
+          # It will automatically create/fetch certificates and provisioning profiles
           echo "Running: xcode-project use-profiles"
-          xcode-project use-profiles
+          echo "This should automatically use the API key: apppleapikey"
+          
+          # Run the command and capture output
+          if xcode-project use-profiles 2>&1 | tee /tmp/codesign_setup.log; then
+            echo "✓ Code signing profiles command completed"
+          else
+            echo "⚠ xcode-project use-profiles had issues"
+            echo "Checking logs..."
+            cat /tmp/codesign_setup.log || true
+          fi
+          
+          # Verify what happened
+          echo ""
+          echo "Checking for certificates and profiles..."
+          ls -la ~/Library/MobileDevice/Provisioning\ Profiles/ 2>/dev/null | head -5 || echo "No provisioning profiles found yet"
+          security find-identity -v -p codesigning 2>/dev/null | grep "JT4YJSSV45" || echo "No certificates found for team JT4YJSSV45"
           
           echo ""
-          echo "Code signing setup completed"
+          echo "Code signing setup step completed"
           echo "=========================================="
           
       - name: Clean iOS build
