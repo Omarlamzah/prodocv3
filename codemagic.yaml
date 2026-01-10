@@ -75,135 +75,96 @@ workflows:
       - name: Create privacy manifests right before build
         script: |
           # Create privacy manifest files immediately before build
-          # Xcode expects: build/ios/Release-iphoneos/PACKAGE_NAME/PACKAGE_NAME_privacy.bundle/PACKAGE_NAME_privacy
+          # For archive builds, Xcode looks in DerivedData/ArchiveIntermediates/UninstalledProducts
+          # For regular builds, Xcode looks in build/ios/Release-iphoneos
           echo "Creating privacy manifest files right before build..."
           
-          BUILD_DIR="build/ios/Release-iphoneos"
-          mkdir -p "$BUILD_DIR"
-          
           # List of packages that commonly need privacy manifests
-          # We'll discover from Pods, but also explicitly handle known problematic ones
           CRITICAL_PACKAGES="url_launcher_ios sqflite_darwin shared_preferences_foundation path_provider_foundation flutter_secure_storage flutter_local_notifications nanopb SDWebImage SwiftyGif share_plus"
           
-          # Function to create privacy manifest for a package
-          create_privacy_manifest() {
+          # Function to create privacy manifest for a package in a specific location
+          create_privacy_manifest_in_dir() {
             local package=$1
-            if [ -z "$package" ] || [ "$package" = "." ] || [ "$package" = ".." ]; then
+            local base_dir=$2
+            if [ -z "$package" ] || [ -z "$base_dir" ]; then
               return
             fi
             
-            # Create package directory first
-            PACKAGE_DIR="${BUILD_DIR}/${package}"
-            mkdir -p "$PACKAGE_DIR"
-            
-            # Create privacy bundle INSIDE package directory (this is what Xcode expects)
-            BUNDLE_DIR="${PACKAGE_DIR}/${package}_privacy.bundle"
+            # Create privacy bundle directly (not in a package subdirectory for archive builds)
+            BUNDLE_DIR="${base_dir}/${package}_privacy.bundle"
             mkdir -p "$BUNDLE_DIR"
-            touch "${BUNDLE_DIR}/${package}_privacy"
-            chmod 644 "${BUNDLE_DIR}/${package}_privacy"
+            # Create an empty file - privacy bundles are resource-only and don't need a binary
+            touch "${BUNDLE_DIR}/${package}_privacy" || true
+            chmod 644 "${BUNDLE_DIR}/${package}_privacy" || true
             echo "Created: ${BUNDLE_DIR}/${package}_privacy"
-            
-            # Also create with other naming conventions
-            BUNDLE_DIR_UPPER="${PACKAGE_DIR}/${package}_Privacy.bundle"
-            mkdir -p "$BUNDLE_DIR_UPPER"
-            touch "${BUNDLE_DIR_UPPER}/${package}_Privacy"
-            chmod 644 "${BUNDLE_DIR_UPPER}/${package}_Privacy"
-            
-            BUNDLE_DIR_SIMPLE="${PACKAGE_DIR}/${package}.bundle"
-            mkdir -p "$BUNDLE_DIR_SIMPLE"
-            touch "${BUNDLE_DIR_SIMPLE}/${package}"
-            chmod 644 "${BUNDLE_DIR_SIMPLE}/${package}"
           }
           
-          # Get all packages from Pods
-          if [ -d "ios/Pods" ]; then
-            echo "Discovering packages from ios/Pods..."
-            for package_dir in ios/Pods/*/; do
-              package=$(basename "$package_dir")
-              create_privacy_manifest "$package"
-            done
-          else
-            echo "Pods directory not found, creating for known packages..."
-            for package in $CRITICAL_PACKAGES; do
-              create_privacy_manifest "$package"
+          # Create in regular build directory
+          BUILD_DIR="build/ios/Release-iphoneos"
+          mkdir -p "$BUILD_DIR"
+          for package in $CRITICAL_PACKAGES; do
+            create_privacy_manifest_in_dir "$package" "$BUILD_DIR"
+          done
+          
+          # Also create in DerivedData locations (for archive builds)
+          # Find the DerivedData directory for this project
+          DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
+          if [ -d "$DERIVED_DATA_BASE" ]; then
+            # Create privacy manifests in potential archive build locations
+            for derived_dir in "$DERIVED_DATA_BASE"/*/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos; do
+              if [ -d "$(dirname "$derived_dir")" ]; then
+                mkdir -p "$derived_dir"
+                for package in $CRITICAL_PACKAGES; do
+                  create_privacy_manifest_in_dir "$package" "$derived_dir"
+                done
+                echo "Created privacy manifests in DerivedData location: $derived_dir"
+              fi
             done
           fi
           
-          # Also explicitly create for critical packages to ensure they exist
-          echo "Ensuring critical packages have privacy manifests..."
-          for package in $CRITICAL_PACKAGES; do
-            create_privacy_manifest "$package"
-          done
-          
-          # Verify critical packages specifically
+          # Verify critical packages
           echo "Verifying privacy manifests for critical packages..."
           for package in url_launcher_ios sqflite_darwin shared_preferences_foundation share_plus; do
-            MANIFEST_PATH="${BUILD_DIR}/${package}/${package}_privacy.bundle/${package}_privacy"
+            MANIFEST_PATH="${BUILD_DIR}/${package}_privacy.bundle/${package}_privacy"
             if [ -f "$MANIFEST_PATH" ]; then
               echo "✓ ${package} privacy manifest exists at: $MANIFEST_PATH"
-              ls -la "${BUILD_DIR}/${package}/" || true
             else
               echo "✗ ${package} privacy manifest NOT found at: $MANIFEST_PATH"
-              # Try to create it again
-              create_privacy_manifest "$package"
-              if [ -f "$MANIFEST_PATH" ]; then
-                echo "✓ Created ${package} privacy manifest successfully"
-              else
-                echo "✗ Failed to create ${package} privacy manifest"
-              fi
             fi
           done
           
           echo "Privacy manifest files created and verified"
           
-      - name: Build iOS (no codesign for testing)
+      - name: Build iOS IPA
         script: |
-          # Create a script that will run during Xcode build to ensure privacy manifests exist
-          # This script will be called by the Podfile script phase, but we also create files here
-          # as a backup in case the Podfile script doesn't run early enough
+          # The Podfile should handle privacy bundles, but we'll also create the files
+          # as a safety measure before building
           
-          # Function to create privacy manifest for all packages
-          create_all_privacy_manifests() {
+          # Function to create privacy manifest files in the location Xcode expects
+          create_privacy_manifests() {
+            # List of packages that need privacy manifests
+            CRITICAL_PACKAGES="url_launcher_ios sqflite_darwin shared_preferences_foundation path_provider_foundation flutter_secure_storage flutter_local_notifications share_plus"
+            
+            # Create in regular build directory
             BUILD_DIR="build/ios/Release-iphoneos"
             mkdir -p "$BUILD_DIR"
             
-            # Get all packages from Pods
-            if [ -d "ios/Pods" ]; then
-              for package_dir in ios/Pods/*/; do
-                package=$(basename "$package_dir")
-                if [ -z "$package" ] || [ "$package" = "." ] || [ "$package" = ".." ]; then
-                  continue
-                fi
-                
-                # Create in package subdirectory (what Xcode expects)
-                PACKAGE_DIR="${BUILD_DIR}/${package}"
-                mkdir -p "$PACKAGE_DIR"
-                
-                BUNDLE_DIR="${PACKAGE_DIR}/${package}_privacy.bundle"
-                mkdir -p "$BUNDLE_DIR"
-                touch "${BUNDLE_DIR}/${package}_privacy"
-                chmod 644 "${BUNDLE_DIR}/${package}_privacy"
-                
-                BUNDLE_DIR_UPPER="${PACKAGE_DIR}/${package}_Privacy.bundle"
-                mkdir -p "$BUNDLE_DIR_UPPER"
-                touch "${BUNDLE_DIR_UPPER}/${package}_Privacy"
-                chmod 644 "${BUNDLE_DIR_UPPER}/${package}_Privacy"
-                
-                BUNDLE_DIR_SIMPLE="${PACKAGE_DIR}/${package}.bundle"
-                mkdir -p "$BUNDLE_DIR_SIMPLE"
-                touch "${BUNDLE_DIR_SIMPLE}/${package}"
-                chmod 644 "${BUNDLE_DIR_SIMPLE}/${package}"
-              done
-            fi
+            for package in $CRITICAL_PACKAGES; do
+              # Create privacy bundle directly in build directory (not in package subdirectory)
+              BUNDLE_DIR="${BUILD_DIR}/${package}_privacy.bundle"
+              mkdir -p "$BUNDLE_DIR"
+              touch "${BUNDLE_DIR}/${package}_privacy" || true
+              chmod 644 "${BUNDLE_DIR}/${package}_privacy" || true
+              echo "Created: ${BUNDLE_DIR}/${package}_privacy"
+            done
           }
           
-          # Build with verbose output to help debug any issues
-          # The Podfile script phase should create the files during build,
-          # but we also try to create them right before the build starts
-          create_all_privacy_manifests
+          # Create privacy manifests before build
+          create_privacy_manifests
           
-          # Build and capture all output
-          flutter build ios --release --no-codesign --verbose 2>&1 | tee /tmp/flutter_build.log || BUILD_FAILED=1
+          # Build IPA with export options
+          # Note: This will create an archive, which is where the privacy bundle error occurs
+          flutter build ipa --release --export-options-plist /Users/builder/export_options.plist 2>&1 | tee /tmp/flutter_build.log || BUILD_FAILED=1
             
           if [ "$BUILD_FAILED" = "1" ]; then
             echo "=========================================="

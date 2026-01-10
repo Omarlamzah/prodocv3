@@ -46,15 +46,26 @@ post_install do |installer|
       config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'YES'
     end
     
-    # Robust fix for "Build input file cannot be found" error with privacy bundles (sqflite, url_launcher, etc)
-    # This prevents Xcode from looking for a binary to sign in resource-only bundles
-    if target.respond_to?(:product_type) && target.product_type == 'com.apple.product-type.bundle'
+    # Comprehensive fix for "Build input file cannot be found" error with privacy bundles
+    # Privacy bundles are resource-only and should not be code signed
+    target_name = target.name.downcase
+    is_privacy_bundle = target_name.include?('privacy') || 
+                       target_name.end_with?('_privacy') ||
+                       target_name.end_with?('_privacy.bundle')
+    
+    if is_privacy_bundle || (target.respond_to?(:product_type) && target.product_type == 'com.apple.product-type.bundle')
       target.build_configurations.each do |config|
         config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
         config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
         config.build_settings['CODE_SIGNING_INJECT_BASE_ENTITLEMENTS'] = 'NO'
-        config.build_settings['MACH_O_TYPE'] = 'staticlib'
+        config.build_settings['MACH_O_TYPE'] = 'mh_bundle'
         config.build_settings['SKIP_INSTALL'] = 'YES'
+        config.build_settings['STRIP_INSTALLED_PRODUCT'] = 'NO'
+        # Prevent Xcode from looking for a binary in resource-only bundles
+        config.build_settings['EXECUTABLE_EXTENSION'] = ''
+        config.build_settings['EXECUTABLE_PREFIX'] = ''
+        # Ensure the bundle is treated as a resource bundle
+        config.build_settings['PRODUCT_TYPE'] = 'com.apple.product-type.bundle'
       end
     end
   end
