@@ -45,6 +45,13 @@ post_install do |installer|
       # Enable Swift Package Manager support
       config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'YES'
     end
+    
+    # Fix for "Build input file cannot be found" error with privacy bundles
+    if target.respond_to?(:product_type) && target.product_type == 'com.apple.product-type.bundle'
+      target.build_configurations.each do |config|
+        config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+      end
+    end
   end
   
   # Ensure Swift Package Manager dependencies are resolved
