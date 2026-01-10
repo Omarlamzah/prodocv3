@@ -28,7 +28,7 @@ require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelpe
 flutter_ios_podfile_setup
 
 target 'Runner' do
-  use_frameworks! :linkage => :static
+  use_frameworks!
   use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
@@ -46,11 +46,15 @@ post_install do |installer|
       config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'YES'
     end
     
-    # Aggressive fix for "Build input file cannot be found" error with privacy bundles (sqflite, url_launcher, etc)
+    # Robust fix for "Build input file cannot be found" error with privacy bundles (sqflite, url_launcher, etc)
     # This prevents Xcode from looking for a binary to sign in resource-only bundles
     if target.respond_to?(:product_type) && target.product_type == 'com.apple.product-type.bundle'
       target.build_configurations.each do |config|
+        config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+        config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+        config.build_settings['CODE_SIGNING_INJECT_BASE_ENTITLEMENTS'] = 'NO'
         config.build_settings['MACH_O_TYPE'] = 'staticlib'
+        config.build_settings['SKIP_INSTALL'] = 'YES'
       end
     end
   end
