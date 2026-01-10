@@ -7,8 +7,8 @@ workflows:
       flutter: stable
       xcode: latest
       cocoapods: default
-      groups:
-        - app_store_credentials  # Your App Store Connect API key group
+      # App Store Connect API key is configured in Codemagic UI as: apppleapikey (Key: 2RD5XCC7GH)
+      # CodeMagic will automatically use it for code signing
         
     # Cache configuration
     cache:
@@ -27,15 +27,14 @@ workflows:
       - name: Set up code signing settings on Xcode project
         script: |
           # Set up code signing using App Store Connect API key
-          # Make sure you have configured the API key in Codemagic UI:
-          # Settings > Integrations > App Store Connect > Add API key
-          # Then add it to environment variables group: app_store_credentials
+          # API key configured in Codemagic UI: apppleapikey (Key: 2RD5XCC7GH)
+          # This command will automatically use the configured API key
           xcode-project use-profiles
           
           # Verify code signing is set up
           echo "Code signing configuration:"
           cd ios
-          xcodebuild -showBuildSettings -workspace Runner.xcworkspace -scheme Runner | grep -i "CODE_SIGN\|PROVISIONING_PROFILE\|DEVELOPMENT_TEAM" || true
+          xcodebuild -showBuildSettings -workspace Runner.xcworkspace -scheme Runner 2>/dev/null | grep -E "CODE_SIGN|PROVISIONING_PROFILE|DEVELOPMENT_TEAM" | head -10 || echo "Note: Code signing settings will be applied during build"
           cd ..
           
       - name: Clean iOS build
@@ -365,13 +364,14 @@ workflows:
         notify:
           success: true
           failure: true
-      # Uncomment and configure for App Store Connect upload
-      # app_store_connect:
-      #   auth: integration
-      #   submit_to_testflight: false
-      #   beta_groups:
-      #     - group name 1
-      #     - group name 2
+      # App Store Connect publishing configuration
+      # Uses the API key: apppleapikey (Key: 2RD5XCC7GH)
+      app_store_connect:
+        auth: integration  # Uses the App Store Connect API key configured in Codemagic UI
+        # submit_to_testflight: false  # Uncomment to disable TestFlight submission
+        # beta_groups:  # Uncomment and add beta group names if needed
+        #   - group name 1
+        #   - group name 2
       
       # Uncomment for Slack notifications
       # slack:
