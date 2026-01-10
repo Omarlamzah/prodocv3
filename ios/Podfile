@@ -115,22 +115,29 @@ post_install do |installer|
         output_paths << "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"
         
         script_phase.shell_script = <<-SCRIPT
-          # Create privacy manifest file - don't fail if directories don't exist yet
-          # This script runs early in the build process to ensure the file exists
-          
+          # Create privacy manifest file immediately - this MUST run before Xcode checks for inputs
           echo "Creating privacy manifest for ${TARGET_NAME}..."
           echo "WRAPPER_NAME: ${WRAPPER_NAME}"
-          echo "UNINSTALLED_PRODUCTS_DIR: ${UNINSTALLED_PRODUCTS_DIR}"
-          echo "BUILT_PRODUCTS_DIR: ${BUILT_PRODUCTS_DIR}"
+          echo "TARGET_NAME: ${TARGET_NAME}"
+          
+          # Extract package name from target (e.g., url_launcher_ios_privacy -> url_launcher_ios)
+          PACKAGE_NAME="${TARGET_NAME}"
+          PACKAGE_NAME="${PACKAGE_NAME%_privacy}"
+          PACKAGE_NAME="${PACKAGE_NAME%_Privacy}"
+          echo "PACKAGE_NAME: ${PACKAGE_NAME}"
           
           # Create files in both possible locations to cover all build scenarios
-          # For archive builds: UNINSTALLED_PRODUCTS_DIR
+          # For archive builds: UNINSTALLED_PRODUCTS_DIR (this is where the error occurs)
           if [ -n "${UNINSTALLED_PRODUCTS_DIR}" ]; then
             ARCHIVE_BUNDLE_PATH="${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}"
             mkdir -p "${ARCHIVE_BUNDLE_PATH}" || true
             ARCHIVE_MANIFEST="${ARCHIVE_BUNDLE_PATH}/${TARGET_NAME}"
+            # Also try with package name (some targets use package_name_privacy)
+            ARCHIVE_MANIFEST_PKG="${ARCHIVE_BUNDLE_PATH}/${PACKAGE_NAME}_privacy"
             touch "${ARCHIVE_MANIFEST}" || true
+            touch "${ARCHIVE_MANIFEST_PKG}" || true
             chmod 644 "${ARCHIVE_MANIFEST}" || true
+            chmod 644 "${ARCHIVE_MANIFEST_PKG}" || true
             echo "✓ Created privacy manifest (archive): ${ARCHIVE_MANIFEST}"
             ls -la "${ARCHIVE_BUNDLE_PATH}" || true
           fi
@@ -140,8 +147,11 @@ post_install do |installer|
             REGULAR_BUNDLE_PATH="${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
             mkdir -p "${REGULAR_BUNDLE_PATH}" || true
             REGULAR_MANIFEST="${REGULAR_BUNDLE_PATH}/${TARGET_NAME}"
+            REGULAR_MANIFEST_PKG="${REGULAR_BUNDLE_PATH}/${PACKAGE_NAME}_privacy"
             touch "${REGULAR_MANIFEST}" || true
+            touch "${REGULAR_MANIFEST_PKG}" || true
             chmod 644 "${REGULAR_MANIFEST}" || true
+            chmod 644 "${REGULAR_MANIFEST_PKG}" || true
             echo "✓ Created privacy manifest (regular): ${REGULAR_MANIFEST}"
             ls -la "${REGULAR_BUNDLE_PATH}" || true
           fi
@@ -206,7 +216,65 @@ post_install do |installer|
     puts "  Created placeholder: #{manifest_file}"
   end
   
-  # Also try to create in DerivedData if it exists
+  # Create a script that will create files during build in DerivedData
+  # This script will be called by the script phases
+  script_content = <<-SCRIPT
+#!/bin/bash
+# Create privacy manifest files in DerivedData during build
+PACKAGES="url_launcher_ios sqflite_darwin shared_preferences_foundation path_provider_foundation flutter_secure_storage flutter_local_notifications share_plus"
+
+# Function to create manifest for a package
+create_manifest() {
+  local pkg=$1
+  local base_dir=$2
+  
+  if [ -z "$pkg" ] || [ -z "$base_dir" ]; then
+    return
+  fi
+  
+  BUNDLE_DIR="${base_dir}/${pkg}_privacy.bundle"
+  mkdir -p "$BUNDLE_DIR"
+  touch "${BUNDLE_DIR}/${pkg}_privacy"
+  chmod 644 "${BUNDLE_DIR}/${pkg}_privacy"
+  echo "Created: ${BUNDLE_DIR}/${pkg}_privacy"
+}
+
+# Try UNINSTALLED_PRODUCTS_DIR first (for archive builds)
+if [ -n "${UNINSTALLED_PRODUCTS_DIR}" ]; then
+  for pkg in $PACKAGES; do
+    create_manifest "$pkg" "${UNINSTALLED_PRODUCTS_DIR}"
+  done
+fi
+
+# Try BUILT_PRODUCTS_DIR (for regular builds)
+if [ -n "${BUILT_PRODUCTS_DIR}" ]; then
+  for pkg in $PACKAGES; do
+    create_manifest "$pkg" "${BUILT_PRODUCTS_DIR}"
+  done
+fi
+
+# Also try to find DerivedData and create there
+DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
+if [ -d "$DERIVED_DATA_BASE" ]; then
+  # Find all Runner-* directories
+  for derived_dir in "$DERIVED_DATA_BASE"/Runner-*/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos; do
+    if [ -d "$(dirname "$derived_dir")" ]; then
+      mkdir -p "$derived_dir"
+      for pkg in $PACKAGES; do
+        create_manifest "$pkg" "$derived_dir"
+      done
+    fi
+  done
+fi
+SCRIPT
+
+  # Save script to a file that can be executed
+  script_file = File.join(File.dirname(__FILE__), 'create_privacy_manifests.sh')
+  File.write(script_file, script_content)
+  FileUtils.chmod(0755, script_file)
+  puts "  Created script: #{script_file}"
+  
+  # Also try to create in DerivedData if it exists (for immediate use)
   derived_data_base = File.join(Dir.home, 'Library', 'Developer', 'Xcode', 'DerivedData')
   if File.directory?(derived_data_base)
     Dir.glob(File.join(derived_data_base, 'Runner-*')).each do |derived_dir|
