@@ -46,8 +46,8 @@ post_install do |installer|
       config.build_settings['ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES'] = 'YES'
     end
     
-    # Fix for "Build input file cannot be found" error with privacy bundles
-    if target.respond_to?(:product_type) && target.product_type == 'com.apple.product-type.bundle'
+    # Fix for "Build input file cannot be found" error with privacy bundles (sqflite, url_launcher, etc)
+    if target.name.include?('privacy') || (target.respond_to?(:product_type) && target.product_type == 'com.apple.product-type.bundle')
       target.build_configurations.each do |config|
         config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
         config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
@@ -56,9 +56,10 @@ post_install do |installer|
     end
   end
   
-  # Ensure Swift Package Manager dependencies are resolved
+  # Ensure Swift Package Manager dependencies are resolved and disable sandboxing
   installer.pods_project.build_configurations.each do |config|
     config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
+    config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
   end
 end
 
