@@ -9,6 +9,10 @@ workflows:
       cocoapods: default
       # App Store Connect API key is configured in Codemagic UI as: apppleapikey (Key: 2RD5XCC7GH)
       # CodeMagic will automatically use it for code signing
+    
+    # Integrations - required for App Store Connect publishing
+    integrations:
+      app_store_connect: apppleapikey  # References the API key configured in Codemagic UI
         
     # Cache configuration
     cache:
