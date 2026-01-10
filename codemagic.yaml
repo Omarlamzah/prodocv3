@@ -137,10 +137,7 @@ workflows:
           
       - name: Build iOS IPA
         script: |
-          # The Podfile should handle privacy bundles, but we'll also create the files
-          # as a safety measure before building
-          
-          # Function to create privacy manifest files in the location Xcode expects
+          # Function to create privacy manifest files in all possible locations
           create_privacy_manifests() {
             # List of packages that need privacy manifests
             CRITICAL_PACKAGES="url_launcher_ios sqflite_darwin shared_preferences_foundation path_provider_foundation flutter_secure_storage flutter_local_notifications share_plus"
@@ -150,13 +147,32 @@ workflows:
             mkdir -p "$BUILD_DIR"
             
             for package in $CRITICAL_PACKAGES; do
-              # Create privacy bundle directly in build directory (not in package subdirectory)
+              # Create privacy bundle directly in build directory
               BUNDLE_DIR="${BUILD_DIR}/${package}_privacy.bundle"
               mkdir -p "$BUNDLE_DIR"
               touch "${BUNDLE_DIR}/${package}_privacy" || true
               chmod 644 "${BUNDLE_DIR}/${package}_privacy" || true
               echo "Created: ${BUNDLE_DIR}/${package}_privacy"
             done
+            
+            # Also create in DerivedData locations for archive builds
+            # The error shows: DerivedData/Runner-*/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos
+            DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
+            if [ -d "$DERIVED_DATA_BASE" ]; then
+              # Find all Runner-* directories in DerivedData
+              for derived_dir in "$DERIVED_DATA_BASE"/Runner-*/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos; do
+                if [ -d "$(dirname "$derived_dir")" ]; then
+                  mkdir -p "$derived_dir"
+                  for package in $CRITICAL_PACKAGES; do
+                    BUNDLE_DIR="${derived_dir}/${package}_privacy.bundle"
+                    mkdir -p "$BUNDLE_DIR"
+                    touch "${BUNDLE_DIR}/${package}_privacy" || true
+                    chmod 644 "${BUNDLE_DIR}/${package}_privacy" || true
+                    echo "Created in DerivedData: ${BUNDLE_DIR}/${package}_privacy"
+                  done
+                fi
+              done
+            fi
           }
           
           # Create privacy manifests before build
@@ -197,7 +213,7 @@ workflows:
               grep -i "Build input file cannot be found\|privacy.*bundle" /tmp/flutter_build.log | head -10
               echo ""
               echo "Attempting to create missing privacy manifests..."
-              create_all_privacy_manifests
+              create_privacy_manifests
               echo "Created privacy manifests."
             fi
             

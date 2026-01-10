@@ -67,6 +67,47 @@ post_install do |installer|
         # Ensure the bundle is treated as a resource bundle
         config.build_settings['PRODUCT_TYPE'] = 'com.apple.product-type.bundle'
       end
+      
+      # Add script phase to create the privacy manifest file during build
+      # The file name should match the target name (e.g., url_launcher_ios_privacy)
+      script_phase_name = 'Create Privacy Manifest File'
+      # Check if script phase already exists
+      existing_script = target.shell_script_build_phases.find { |phase| phase.name == script_phase_name }
+      
+      unless existing_script
+        script_phase = target.new_shell_script_build_phase(script_phase_name)
+        
+        # Determine output paths for both archive and regular builds
+        output_paths = []
+        output_paths << "${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"
+        output_paths << "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"
+        
+        script_phase.shell_script = <<-SCRIPT
+          set -e
+          
+          # Determine output directory - try UninstalledProducts first (for archive builds), then BUILT_PRODUCTS_DIR
+          OUTPUT_DIR="${UNINSTALLED_PRODUCTS_DIR}"
+          if [ -z "$OUTPUT_DIR" ] || [ ! -d "$(dirname "$OUTPUT_DIR")" ]; then
+            OUTPUT_DIR="${BUILT_PRODUCTS_DIR}"
+          fi
+          
+          # Create the bundle directory (WRAPPER_NAME is the bundle name, e.g., url_launcher_ios_privacy.bundle)
+          BUNDLE_PATH="${OUTPUT_DIR}/${WRAPPER_NAME}"
+          mkdir -p "${BUNDLE_PATH}"
+          
+          # Create the privacy manifest file
+          # The file name should match what Xcode expects: target_name (e.g., url_launcher_ios_privacy)
+          # Error shows: url_launcher_ios_privacy.bundle/url_launcher_ios_privacy
+          MANIFEST_FILE="${BUNDLE_PATH}/${TARGET_NAME}"
+          touch "${MANIFEST_FILE}"
+          chmod 644 "${MANIFEST_FILE}"
+          echo "Created privacy manifest: ${MANIFEST_FILE}"
+        SCRIPT
+        
+        # Declare the output file so Xcode knows it will be created
+        script_phase.output_paths = output_paths
+        script_phase.run_only_for_deployment_postprocessing = '0'
+      end
     end
   end
   
