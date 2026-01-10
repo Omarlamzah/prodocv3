@@ -10,9 +10,9 @@ workflows:
       # App Store Connect API key is configured in Codemagic UI as: apppleapikey (Key: 2RD5XCC7GH)
       # CodeMagic will automatically use it for code signing
     
-    # Integrations - required for App Store Connect publishing
+    # Integrations - required for App Store Connect publishing and code signing
     integrations:
-      app_store_connect: apppleapikey  # References the API key configured in Codemagic UI
+      app_store_connect: apppleapikey  # References the API key configured in Codemagic UI (Key: 2RD5XCC7GH)
         
     # Cache configuration
     cache:
@@ -32,14 +32,24 @@ workflows:
         script: |
           # Set up code signing using App Store Connect API key
           # API key configured in Codemagic UI: apppleapikey (Key: 2RD5XCC7GH)
-          # This command will automatically use the configured API key
+          # The integrations section makes the API key available for code signing
+          
+          echo "=========================================="
+          echo "Setting up code signing"
+          echo "=========================================="
+          echo "Team ID: JT4YJSSV45"
+          echo "Bundle ID: com.nextpital.prodoc"
+          echo "API Key: apppleapikey (2RD5XCC7GH)"
+          echo ""
+          
+          # Use xcode-project to set up code signing automatically
+          # This command should use the App Store Connect API key from integrations
+          echo "Running: xcode-project use-profiles"
           xcode-project use-profiles
           
-          # Verify code signing is set up
-          echo "Code signing configuration:"
-          cd ios
-          xcodebuild -showBuildSettings -workspace Runner.xcworkspace -scheme Runner 2>/dev/null | grep -E "CODE_SIGN|PROVISIONING_PROFILE|DEVELOPMENT_TEAM" | head -10 || echo "Note: Code signing settings will be applied during build"
-          cd ..
+          echo ""
+          echo "Code signing setup completed"
+          echo "=========================================="
           
       - name: Clean iOS build
         script: |
