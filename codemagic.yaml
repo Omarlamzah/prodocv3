@@ -51,6 +51,26 @@ workflows:
           pod install --repo-update
           cd ..
           
+      - name: Create privacy manifest placeholders after pod install
+        script: |
+          # Create privacy manifest files immediately after pod install
+          # This ensures they exist before Xcode tries to use them as build inputs
+          echo "Creating privacy manifest placeholders..."
+          
+          CRITICAL_PACKAGES="url_launcher_ios sqflite_darwin shared_preferences_foundation path_provider_foundation flutter_secure_storage flutter_local_notifications share_plus"
+          
+          # Create in build directory
+          BUILD_DIR="build/ios/Release-iphoneos"
+          mkdir -p "$BUILD_DIR"
+          
+          for package in $CRITICAL_PACKAGES; do
+            BUNDLE_DIR="${BUILD_DIR}/${package}_privacy.bundle"
+            mkdir -p "$BUNDLE_DIR"
+            touch "${BUNDLE_DIR}/${package}_privacy"
+            chmod 644 "${BUNDLE_DIR}/${package}_privacy"
+            echo "Created placeholder: ${BUNDLE_DIR}/${package}_privacy"
+          done
+          
       - name: Verify Podfile script phases
         script: |
           # Verify that Podfile has privacy manifest script phases

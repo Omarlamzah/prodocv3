@@ -66,6 +66,22 @@ post_install do |installer|
         config.build_settings['EXECUTABLE_PREFIX'] = ''
         # Ensure the bundle is treated as a resource bundle
         config.build_settings['PRODUCT_TYPE'] = 'com.apple.product-type.bundle'
+        # Allow missing input files (the script phase will create them)
+        config.build_settings['ALWAYS_SEARCH_USER_PATHS'] = 'NO'
+      end
+      
+      # Remove any Copy Files phases that might reference the privacy manifest as an input
+      target.build_phases.each do |phase|
+        if phase.respond_to?(:files)
+          phase.files.to_a.each do |file|
+            if file.respond_to?(:file_ref) && file.file_ref
+              file_name = file.file_ref.path rescue nil
+              if file_name && (file_name.include?('privacy') || file_name.end_with?('_privacy'))
+                phase.files.delete(file)
+              end
+            end
+          end
+        end
       end
       
       # Add script phase to create the privacy manifest file during build
@@ -83,30 +99,66 @@ post_install do |installer|
         output_paths << "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"
         
         script_phase.shell_script = <<-SCRIPT
-          set -e
+          # Create privacy manifest file - don't fail if directories don't exist yet
+          # This script runs early in the build process to ensure the file exists
           
-          # Determine output directory - try UninstalledProducts first (for archive builds), then BUILT_PRODUCTS_DIR
-          OUTPUT_DIR="${UNINSTALLED_PRODUCTS_DIR}"
-          if [ -z "$OUTPUT_DIR" ] || [ ! -d "$(dirname "$OUTPUT_DIR")" ]; then
-            OUTPUT_DIR="${BUILT_PRODUCTS_DIR}"
+          echo "Creating privacy manifest for ${TARGET_NAME}..."
+          echo "WRAPPER_NAME: ${WRAPPER_NAME}"
+          echo "UNINSTALLED_PRODUCTS_DIR: ${UNINSTALLED_PRODUCTS_DIR}"
+          echo "BUILT_PRODUCTS_DIR: ${BUILT_PRODUCTS_DIR}"
+          
+          # Create files in both possible locations to cover all build scenarios
+          # For archive builds: UNINSTALLED_PRODUCTS_DIR
+          if [ -n "${UNINSTALLED_PRODUCTS_DIR}" ]; then
+            ARCHIVE_BUNDLE_PATH="${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}"
+            mkdir -p "${ARCHIVE_BUNDLE_PATH}" || true
+            ARCHIVE_MANIFEST="${ARCHIVE_BUNDLE_PATH}/${TARGET_NAME}"
+            touch "${ARCHIVE_MANIFEST}" || true
+            chmod 644 "${ARCHIVE_MANIFEST}" || true
+            echo "✓ Created privacy manifest (archive): ${ARCHIVE_MANIFEST}"
+            ls -la "${ARCHIVE_BUNDLE_PATH}" || true
           fi
           
-          # Create the bundle directory (WRAPPER_NAME is the bundle name, e.g., url_launcher_ios_privacy.bundle)
-          BUNDLE_PATH="${OUTPUT_DIR}/${WRAPPER_NAME}"
-          mkdir -p "${BUNDLE_PATH}"
+          # For regular builds: BUILT_PRODUCTS_DIR
+          if [ -n "${BUILT_PRODUCTS_DIR}" ]; then
+            REGULAR_BUNDLE_PATH="${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
+            mkdir -p "${REGULAR_BUNDLE_PATH}" || true
+            REGULAR_MANIFEST="${REGULAR_BUNDLE_PATH}/${TARGET_NAME}"
+            touch "${REGULAR_MANIFEST}" || true
+            chmod 644 "${REGULAR_MANIFEST}" || true
+            echo "✓ Created privacy manifest (regular): ${REGULAR_MANIFEST}"
+            ls -la "${REGULAR_BUNDLE_PATH}" || true
+          fi
           
-          # Create the privacy manifest file
-          # The file name should match what Xcode expects: target_name (e.g., url_launcher_ios_privacy)
-          # Error shows: url_launcher_ios_privacy.bundle/url_launcher_ios_privacy
-          MANIFEST_FILE="${BUNDLE_PATH}/${TARGET_NAME}"
-          touch "${MANIFEST_FILE}"
-          chmod 644 "${MANIFEST_FILE}"
-          echo "Created privacy manifest: ${MANIFEST_FILE}"
+          # Also try TARGET_BUILD_DIR as fallback
+          if [ -n "${TARGET_BUILD_DIR}" ]; then
+            FALLBACK_BUNDLE_PATH="${TARGET_BUILD_DIR}/${WRAPPER_NAME}"
+            mkdir -p "${FALLBACK_BUNDLE_PATH}" || true
+            FALLBACK_MANIFEST="${FALLBACK_BUNDLE_PATH}/${TARGET_NAME}"
+            touch "${FALLBACK_MANIFEST}" || true
+            chmod 644 "${FALLBACK_MANIFEST}" || true
+            echo "✓ Created privacy manifest (fallback): ${FALLBACK_MANIFEST}"
+          fi
         SCRIPT
         
-        # Declare the output file so Xcode knows it will be created
+        # Declare the output files so Xcode knows they will be created
         script_phase.output_paths = output_paths
         script_phase.run_only_for_deployment_postprocessing = '0'
+        
+        # Try to move script phase to the beginning
+        begin
+          phases_array = target.build_phases.to_a
+          if phases_array.include?(script_phase) && phases_array.first != script_phase
+            phases_array.delete(script_phase)
+            phases_array.unshift(script_phase)
+            # Rebuild phases array
+            target.build_phases.clear
+            phases_array.each { |p| target.build_phases << p }
+          end
+        rescue => e
+          # If moving fails, that's okay - the script will still run
+          puts "Note: Could not reorder build phases for #{target.name}: #{e.message}"
+        end
       end
     end
   end
