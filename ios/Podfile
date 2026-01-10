@@ -171,19 +171,28 @@ post_install do |installer|
         script_phase.output_paths = output_paths
         script_phase.run_only_for_deployment_postprocessing = '0'
         
-        # Try to move script phase to the beginning
+        # CRITICAL: Move script phase to the VERY BEGINNING to run before Xcode checks for inputs
         begin
-          phases_array = target.build_phases.to_a
-          if phases_array.include?(script_phase) && phases_array.first != script_phase
+          phases_array = target.build_phases.to_a.dup
+          if phases_array.include?(script_phase)
             phases_array.delete(script_phase)
             phases_array.unshift(script_phase)
-            # Rebuild phases array
+            # Clear and rebuild to ensure order
             target.build_phases.clear
             phases_array.each { |p| target.build_phases << p }
+            puts "  ✓ Moved script phase to beginning for #{target.name}"
+          else
+            # If not in array yet, add it first
+            target.build_phases.unshift(script_phase) rescue nil
+            puts "  ✓ Added script phase to beginning for #{target.name}"
           end
         rescue => e
-          # If moving fails, that's okay - the script will still run
-          puts "Note: Could not reorder build phases for #{target.name}: #{e.message}"
+          puts "  ⚠ Could not reorder build phases for #{target.name}: #{e.message}"
+          # Try alternative method
+          begin
+            target.build_phases.unshift(script_phase) if target.build_phases.to_a.include?(script_phase) == false
+          rescue
+          end
         end
       end
     end
@@ -203,7 +212,7 @@ post_install do |installer|
                       'path_provider_foundation', 'flutter_secure_storage', 
                       'flutter_local_notifications', 'share_plus']
   
-  # Create in a location that will be used during build
+  # Create in build directory
   build_dir = File.join(File.dirname(__FILE__), '..', 'build', 'ios', 'Release-iphoneos')
   FileUtils.mkdir_p(build_dir) rescue nil
   
@@ -214,6 +223,20 @@ post_install do |installer|
     FileUtils.touch(manifest_file) rescue nil
     FileUtils.chmod(0644, manifest_file) rescue nil
     puts "  Created placeholder: #{manifest_file}"
+  end
+  
+  # Also create in Pods directory structure so they're part of the project
+  pods_dir = File.join(File.dirname(__FILE__), 'Pods')
+  if File.directory?(pods_dir)
+    privacy_packages.each do |pkg|
+      # Create privacy bundle in Pods directory
+      pod_bundle_dir = File.join(pods_dir, "#{pkg}_privacy.bundle")
+      FileUtils.mkdir_p(pod_bundle_dir) rescue nil
+      pod_manifest_file = File.join(pod_bundle_dir, "#{pkg}_privacy")
+      FileUtils.touch(pod_manifest_file) rescue nil
+      FileUtils.chmod(0644, pod_manifest_file) rescue nil
+      puts "  Created in Pods: #{pod_manifest_file}"
+    end
   end
   
   # Create a script that will create files during build in DerivedData
