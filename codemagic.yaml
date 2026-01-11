@@ -12,7 +12,7 @@ workflows:
     
     # Integrations - required for App Store Connect publishing and code signing
     integrations:
-      app_store_connect: apppleapikey  # References the API key configured in Codemagic UI (Key: 2RD5XCC7GH)
+      app_store_connect: codemagicapi  # References the API key configured in Codemagic UI (Key: 2RD5XCC7GH, Access: App Manager)
         
     # Cache configuration
     cache:
@@ -39,14 +39,14 @@ workflows:
           echo "=========================================="
           echo "Team ID: JT4YJSSV45"
           echo "Bundle ID: com.nextpital.prodoc"
-          echo "API Key: apppleapikey (2RD5XCC7GH)"
+          echo "API Key: codemagicapi (2RD5XCC7GH, App Manager access)"
           echo ""
           
           # Use xcode-project to set up code signing automatically
           # This command should use the App Store Connect API key from integrations
           # to automatically create/fetch certificates and provisioning profiles
           echo "Running: xcode-project use-profiles"
-          echo "This should automatically use the API key: apppleapikey"
+          echo "This should automatically use the API key: codemagicapi"
           
           # Run the command - it should create certificates if they don't exist
           xcode-project use-profiles 2>&1 | tee /tmp/codesign_setup.log
@@ -406,7 +406,7 @@ workflows:
           success: true
           failure: true
       # App Store Connect publishing configuration
-      # Uses the API key: apppleapikey (Key: 2RD5XCC7GH)
+      # Uses the API key: codemagicapi (Key: 2RD5XCC7GH, Access: App Manager)
       app_store_connect:
         auth: integration  # Uses the App Store Connect API key configured in Codemagic UI
         # submit_to_testflight: false  # Uncomment to disable TestFlight submission
