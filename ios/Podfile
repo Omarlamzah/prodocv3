@@ -53,7 +53,15 @@ post_install do |installer|
                        target_name.end_with?('_privacy') ||
                        target_name.end_with?('_privacy.bundle')
     
+    # Also check product name and wrapper name
+    product_name = target.respond_to?(:product_name) ? target.product_name.to_s.downcase : ''
+    wrapper_name = target.respond_to?(:wrapper_name) ? target.wrapper_name.to_s.downcase : ''
+    is_privacy_bundle = is_privacy_bundle || 
+                       product_name.include?('privacy') || 
+                       wrapper_name.include?('privacy')
+    
     if is_privacy_bundle || (target.respond_to?(:product_type) && target.product_type == 'com.apple.product-type.bundle')
+      puts "Processing privacy bundle target: #{target.name}"
       target.build_configurations.each do |config|
         config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
         config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
@@ -109,67 +117,103 @@ post_install do |installer|
       unless existing_script
         script_phase = target.new_shell_script_build_phase(script_phase_name)
         
-        # Determine output paths for both archive and regular builds
+        # Extract package name from target name for output path declarations
+        package_name = target.name.gsub(/_privacy$/i, '').gsub(/_Privacy$/i, '')
+        
+        # Declare ALL possible output paths - Xcode needs to know about all files that will be created
+        # This is critical - Xcode checks for these files as build inputs, so we must declare them as outputs
         output_paths = []
+        # Archive build paths (UNINSTALLED_PRODUCTS_DIR)
         output_paths << "${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"
+        output_paths << "${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/#{package_name}_privacy"
+        # Regular build paths (BUILT_PRODUCTS_DIR)
         output_paths << "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"
+        output_paths << "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/#{package_name}_privacy"
+        # Also declare with explicit bundle name format
+        bundle_name = "#{package_name}_privacy.bundle"
+        output_paths << "${UNINSTALLED_PRODUCTS_DIR}/#{bundle_name}/#{package_name}_privacy"
+        output_paths << "${BUILT_PRODUCTS_DIR}/#{bundle_name}/#{package_name}_privacy"
         
         script_phase.shell_script = <<-SCRIPT
+          set -e  # Exit on error (but we use || true for non-critical operations)
+          
           # Create privacy manifest file immediately - this MUST run before Xcode checks for inputs
+          echo "=========================================="
           echo "Creating privacy manifest for ${TARGET_NAME}..."
           echo "WRAPPER_NAME: ${WRAPPER_NAME}"
           echo "TARGET_NAME: ${TARGET_NAME}"
+          echo "PACKAGE_NAME: #{package_name}"
           
           # Extract package name from target (e.g., url_launcher_ios_privacy -> url_launcher_ios)
-          PACKAGE_NAME="${TARGET_NAME}"
-          PACKAGE_NAME="${PACKAGE_NAME%_privacy}"
-          PACKAGE_NAME="${PACKAGE_NAME%_Privacy}"
-          echo "PACKAGE_NAME: ${PACKAGE_NAME}"
+          PACKAGE_NAME="#{package_name}"
+          echo "Using PACKAGE_NAME: $PACKAGE_NAME"
           
-          # Create files in both possible locations to cover all build scenarios
+          # Function to create manifest file
+          create_manifest() {
+            local manifest_path="$1"
+            local dir_path=$(dirname "$manifest_path")
+            mkdir -p "$dir_path" || true
+            touch "$manifest_path" || true
+            chmod 644 "$manifest_path" || true
+            if [ -f "$manifest_path" ]; then
+              echo "✓ Created: $manifest_path"
+            else
+              echo "✗ Failed to create: $manifest_path"
+            fi
+          }
+          
           # For archive builds: UNINSTALLED_PRODUCTS_DIR (this is where the error occurs)
           if [ -n "${UNINSTALLED_PRODUCTS_DIR}" ]; then
+            echo "Creating files in UNINSTALLED_PRODUCTS_DIR: ${UNINSTALLED_PRODUCTS_DIR}"
+            
+            # Create with WRAPPER_NAME (standard format)
             ARCHIVE_BUNDLE_PATH="${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}"
-            mkdir -p "${ARCHIVE_BUNDLE_PATH}" || true
-            ARCHIVE_MANIFEST="${ARCHIVE_BUNDLE_PATH}/${TARGET_NAME}"
-            # Also try with package name (some targets use package_name_privacy)
-            ARCHIVE_MANIFEST_PKG="${ARCHIVE_BUNDLE_PATH}/${PACKAGE_NAME}_privacy"
-            touch "${ARCHIVE_MANIFEST}" || true
-            touch "${ARCHIVE_MANIFEST_PKG}" || true
-            chmod 644 "${ARCHIVE_MANIFEST}" || true
-            chmod 644 "${ARCHIVE_MANIFEST_PKG}" || true
-            echo "✓ Created privacy manifest (archive): ${ARCHIVE_MANIFEST}"
-            ls -la "${ARCHIVE_BUNDLE_PATH}" || true
+            create_manifest "${ARCHIVE_BUNDLE_PATH}/${TARGET_NAME}"
+            create_manifest "${ARCHIVE_BUNDLE_PATH}/${PACKAGE_NAME}_privacy"
+            
+            # Also create with explicit bundle name format (sqflite_darwin_privacy.bundle)
+            EXPLICIT_BUNDLE="${UNINSTALLED_PRODUCTS_DIR}/${PACKAGE_NAME}_privacy.bundle"
+            create_manifest "${EXPLICIT_BUNDLE}/${PACKAGE_NAME}_privacy"
+            create_manifest "${EXPLICIT_BUNDLE}/${TARGET_NAME}"
+            
+            echo "Archive files created in: ${UNINSTALLED_PRODUCTS_DIR}"
+            ls -la "${UNINSTALLED_PRODUCTS_DIR}" | grep -i privacy || echo "No privacy bundles found in listing"
+          else
+            echo "UNINSTALLED_PRODUCTS_DIR is not set"
           fi
           
           # For regular builds: BUILT_PRODUCTS_DIR
           if [ -n "${BUILT_PRODUCTS_DIR}" ]; then
+            echo "Creating files in BUILT_PRODUCTS_DIR: ${BUILT_PRODUCTS_DIR}"
+            
             REGULAR_BUNDLE_PATH="${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
-            mkdir -p "${REGULAR_BUNDLE_PATH}" || true
-            REGULAR_MANIFEST="${REGULAR_BUNDLE_PATH}/${TARGET_NAME}"
-            REGULAR_MANIFEST_PKG="${REGULAR_BUNDLE_PATH}/${PACKAGE_NAME}_privacy"
-            touch "${REGULAR_MANIFEST}" || true
-            touch "${REGULAR_MANIFEST_PKG}" || true
-            chmod 644 "${REGULAR_MANIFEST}" || true
-            chmod 644 "${REGULAR_MANIFEST_PKG}" || true
-            echo "✓ Created privacy manifest (regular): ${REGULAR_MANIFEST}"
-            ls -la "${REGULAR_BUNDLE_PATH}" || true
+            create_manifest "${REGULAR_BUNDLE_PATH}/${TARGET_NAME}"
+            create_manifest "${REGULAR_BUNDLE_PATH}/${PACKAGE_NAME}_privacy"
+            
+            EXPLICIT_BUNDLE="${BUILT_PRODUCTS_DIR}/${PACKAGE_NAME}_privacy.bundle"
+            create_manifest "${EXPLICIT_BUNDLE}/${PACKAGE_NAME}_privacy"
+            create_manifest "${EXPLICIT_BUNDLE}/${TARGET_NAME}"
+          else
+            echo "BUILT_PRODUCTS_DIR is not set"
           fi
           
           # Also try TARGET_BUILD_DIR as fallback
           if [ -n "${TARGET_BUILD_DIR}" ]; then
             FALLBACK_BUNDLE_PATH="${TARGET_BUILD_DIR}/${WRAPPER_NAME}"
-            mkdir -p "${FALLBACK_BUNDLE_PATH}" || true
-            FALLBACK_MANIFEST="${FALLBACK_BUNDLE_PATH}/${TARGET_NAME}"
-            touch "${FALLBACK_MANIFEST}" || true
-            chmod 644 "${FALLBACK_MANIFEST}" || true
-            echo "✓ Created privacy manifest (fallback): ${FALLBACK_MANIFEST}"
+            create_manifest "${FALLBACK_BUNDLE_PATH}/${TARGET_NAME}"
+            create_manifest "${FALLBACK_BUNDLE_PATH}/${PACKAGE_NAME}_privacy"
           fi
+          
+          echo "Privacy manifest creation completed for ${TARGET_NAME}"
+          echo "=========================================="
         SCRIPT
         
         # Declare the output files so Xcode knows they will be created
-        script_phase.output_paths = output_paths
+        # This is CRITICAL - Xcode checks for these files as build inputs
+        script_phase.output_paths = output_paths.uniq
         script_phase.run_only_for_deployment_postprocessing = '0'
+        # Ensure script runs early
+        script_phase.always_out_of_date = '1'
         
         # CRITICAL: Move script phase to the VERY BEGINNING to run before Xcode checks for inputs
         begin
