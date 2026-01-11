@@ -131,94 +131,89 @@ post_install do |installer|
         # Extract package name from target name
         package_name = target.name.gsub(/_privacy$/i, '').gsub(/_Privacy$/i, '')
         
-        # Declare ONLY the specific output path for this target
-        # This tells Xcode the script will create this file, preventing "Build input file cannot be found" errors
-        # We only declare one path per target to avoid "Multiple commands produce" errors
+        # Declare the output path - this tells Xcode the script will create this file
+        # The path format must match exactly what Xcode expects
         output_paths = ["${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"]
         
         script_phase.shell_script = <<-SCRIPT
-          # Create privacy manifest file immediately - this MUST run before Xcode checks for inputs
-          # Don't use set -e, we want to continue even if some operations fail
+          # Create privacy manifest file - MUST run before Xcode checks for inputs
           
           echo "=========================================="
-          echo "Creating privacy manifest for ${TARGET_NAME}..."
+          echo "[Privacy Manifest] Target: ${TARGET_NAME}"
           echo "WRAPPER_NAME: ${WRAPPER_NAME}"
           echo "TARGET_NAME: ${TARGET_NAME}"
-          echo "UNINSTALLED_PRODUCTS_DIR: ${UNINSTALLED_PRODUCTS_DIR}"
-          echo "BUILT_PRODUCTS_DIR: ${BUILT_PRODUCTS_DIR}"
           
-          # Extract package name from target
-          PACKAGE_NAME="#{package_name}"
-          echo "PACKAGE_NAME: $PACKAGE_NAME"
-          
-          # Function to create manifest file
-          create_manifest() {
-            local manifest_path="$1"
-            local dir_path=$(dirname "$manifest_path")
-            
-            # Create directory if it doesn't exist
-            mkdir -p "$dir_path" 2>/dev/null || true
-            
-            # Create file if it doesn't exist
-            if [ ! -f "$manifest_path" ]; then
-              touch "$manifest_path" 2>/dev/null || true
-              chmod 644 "$manifest_path" 2>/dev/null || true
-            fi
-            
-            # Verify file was created
-            if [ -f "$manifest_path" ]; then
-              echo "✓ Created/verified: $manifest_path"
-              return 0
-            else
-              echo "✗ Failed to create: $manifest_path"
-              return 1
-            fi
-          }
-          
-          # Create file in UNINSTALLED_PRODUCTS_DIR (for archive builds)
+          # Create the file in UNINSTALLED_PRODUCTS_DIR (archive builds)
           if [ -n "${UNINSTALLED_PRODUCTS_DIR}" ]; then
-            ARCHIVE_BUNDLE_PATH="${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}"
-            create_manifest "${ARCHIVE_BUNDLE_PATH}/${TARGET_NAME}" || true
+            ARCHIVE_PATH="${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}"
+            ARCHIVE_FILE="${ARCHIVE_PATH}/${TARGET_NAME}"
+            
+            # Create directory structure
+            mkdir -p "${ARCHIVE_PATH}" 2>/dev/null || true
+            
+            # Create the file
+            touch "${ARCHIVE_FILE}" 2>/dev/null || true
+            chmod 644 "${ARCHIVE_FILE}" 2>/dev/null || true
+            
+            if [ -f "${ARCHIVE_FILE}" ]; then
+              echo "✓ Created: ${ARCHIVE_FILE}"
+            else
+              echo "✗ Failed: ${ARCHIVE_FILE}"
+            fi
           fi
           
-          # Also create in BUILT_PRODUCTS_DIR (for regular builds)
+          # Also create in BUILT_PRODUCTS_DIR (regular builds)
           if [ -n "${BUILT_PRODUCTS_DIR}" ]; then
-            REGULAR_BUNDLE_PATH="${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
-            create_manifest "${REGULAR_BUNDLE_PATH}/${TARGET_NAME}" || true
+            REGULAR_PATH="${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
+            REGULAR_FILE="${REGULAR_PATH}/${TARGET_NAME}"
+            
+            mkdir -p "${REGULAR_PATH}" 2>/dev/null || true
+            touch "${REGULAR_FILE}" 2>/dev/null || true
+            chmod 644 "${REGULAR_FILE}" 2>/dev/null || true
+            
+            if [ -f "${REGULAR_FILE}" ]; then
+              echo "✓ Created: ${REGULAR_FILE}"
+            fi
           fi
           
-          echo "Privacy manifest creation completed for ${TARGET_NAME}"
           echo "=========================================="
         SCRIPT
         
-        # Declare the output path so Xcode knows this script creates the file
-        # This prevents "Build input file cannot be found" errors
+        # Declare output path - CRITICAL: This tells Xcode the file will be created
         script_phase.output_paths = output_paths
         script_phase.run_only_for_deployment_postprocessing = '0'
-        # Ensure script runs early and always
         script_phase.always_out_of_date = '1'
+        # Set input file list to empty to prevent Xcode from looking for the file as input
+        script_phase.input_file_list_paths = []
+        script_phase.input_paths = []
         
         # CRITICAL: Move script phase to the VERY BEGINNING to run before Xcode checks for inputs
+        # This must run before any Copy Bundle Resources or other phases
         begin
-          phases_array = target.build_phases.to_a.dup
-          if phases_array.include?(script_phase)
-            phases_array.delete(script_phase)
-            phases_array.unshift(script_phase)
-            # Clear and rebuild to ensure order
-            target.build_phases.clear
-            phases_array.each { |p| target.build_phases << p }
-            puts "  ✓ Moved script phase to beginning for #{target.name}"
-          else
-            # If not in array yet, add it first
-            target.build_phases.unshift(script_phase) rescue nil
-            puts "  ✓ Added script phase to beginning for #{target.name}"
-          end
+          # Get all build phases
+          all_phases = target.build_phases.to_a
+          
+          # Remove script phase if it exists
+          all_phases.delete(script_phase)
+          
+          # Insert at the very beginning
+          all_phases.unshift(script_phase)
+          
+          # Rebuild phases array
+          target.build_phases.clear
+          all_phases.each { |p| target.build_phases << p }
+          
+          puts "  ✓ Script phase moved to beginning for #{target.name} (position: #{target.build_phases.index(script_phase)})"
         rescue => e
           puts "  ⚠ Could not reorder build phases for #{target.name}: #{e.message}"
-          # Try alternative method
+          # Fallback: try to add at beginning
           begin
-            target.build_phases.unshift(script_phase) if target.build_phases.to_a.include?(script_phase) == false
-          rescue
+            unless target.build_phases.to_a.include?(script_phase)
+              target.build_phases.unshift(script_phase)
+              puts "  ✓ Added script phase to beginning for #{target.name}"
+            end
+          rescue => e2
+            puts "  ✗ Failed to add script phase for #{target.name}: #{e2.message}"
           end
         end
       end
