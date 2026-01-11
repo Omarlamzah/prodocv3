@@ -191,39 +191,39 @@ echo "[Privacy] Completed for ${TARGET}"
       # Ensure no inputs are declared
       script_phase.input_file_list_paths = [] rescue nil
       script_phase.input_paths = [] rescue nil
+      
+      # CRITICAL: Move script phase to the VERY BEGINNING to run before Xcode checks for inputs
+      # This must run before any Copy Bundle Resources or other phases
+      begin
+        # Get all build phases
+        all_phases = target.build_phases.to_a
         
-        # CRITICAL: Move script phase to the VERY BEGINNING to run before Xcode checks for inputs
-        # This must run before any Copy Bundle Resources or other phases
+        # Remove script phase if it exists
+        all_phases.delete(script_phase)
+        
+        # Insert at the very beginning
+        all_phases.unshift(script_phase)
+        
+        # Rebuild phases array
+        target.build_phases.clear
+        all_phases.each { |p| target.build_phases << p }
+        
+        position = target.build_phases.index(script_phase)
+        puts "  ✓ Script phase moved to beginning for #{target.name} (position: #{position || 'unknown'})"
+        puts "  ✓ Output path declared: ${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"
+      rescue => e
+        puts "  ⚠ Could not reorder build phases for #{target.name}: #{e.message}"
+        # Fallback: try to add at beginning
         begin
-          # Get all build phases
-          all_phases = target.build_phases.to_a
-          
-          # Remove script phase if it exists
-          all_phases.delete(script_phase)
-          
-          # Insert at the very beginning
-          all_phases.unshift(script_phase)
-          
-          # Rebuild phases array
-          target.build_phases.clear
-          all_phases.each { |p| target.build_phases << p }
-          
-          position = target.build_phases.index(script_phase)
-          puts "  ✓ Script phase moved to beginning for #{target.name} (position: #{position || 'unknown'})"
-          puts "  ✓ Output path declared: ${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"
-        rescue => e
-          puts "  ⚠ Could not reorder build phases for #{target.name}: #{e.message}"
-          # Fallback: try to add at beginning
-          begin
-            unless target.build_phases.to_a.include?(script_phase)
-              target.build_phases.unshift(script_phase)
-              puts "  ✓ Added script phase to beginning for #{target.name}"
-            end
-          rescue => e2
-            puts "  ✗ Failed to add script phase for #{target.name}: #{e2.message}"
+          unless target.build_phases.to_a.include?(script_phase)
+            target.build_phases.unshift(script_phase)
+            puts "  ✓ Added script phase to beginning for #{target.name}"
           end
+        rescue => e2
+          puts "  ✗ Failed to add script phase for #{target.name}: #{e2.message}"
         end
       end
+    end
     end
   end
   
