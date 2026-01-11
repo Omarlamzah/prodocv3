@@ -31,51 +31,26 @@ workflows:
       - name: Set up code signing settings on Xcode project
         script: |
           # Set up code signing using App Store Connect API key
-          # API key configured in Codemagic UI: apppleapikey (Key: 2RD5XCC7GH)
+          # API key configured in Codemagic UI: myappkey_admin_forcodemajic (Key: 87FW8F4TSV, Admin access)
           # The integrations section makes the API key available for code signing
+          # DEVELOPMENT_TEAM is already set in the Xcode project file (JT4YJSSV45)
+          # CodeMagic will automatically create certificates and provisioning profiles during the build
           
           echo "=========================================="
-          echo "Setting up code signing"
+          echo "Code signing configuration"
           echo "=========================================="
-          echo "Team ID: JT4YJSSV45"
+          echo "Team ID: JT4YJSSV45 (set in Xcode project)"
           echo "Bundle ID: com.nextpital.prodoc"
           echo "API Key: myappkey_admin_forcodemajic (87FW8F4TSV, Admin access)"
+          echo "Code Sign Style: Automatic"
           echo ""
-          
-          # Use xcode-project to set up code signing automatically
-          # This command should use the App Store Connect API key from integrations
-          # to automatically create/fetch certificates and provisioning profiles
-          echo "Running: xcode-project use-profiles"
-          echo "This should automatically use the API key: myappkey_admin_forcodemajic"
-          
-          # Run the command - it should create certificates if they don't exist
-          xcode-project use-profiles 2>&1 | tee /tmp/codesign_setup.log
-          
-          # Check if certificates were created
+          echo "Verifying Xcode project configuration..."
+          cd ios
+          xcodebuild -project Runner.xcodeproj -target Runner -showBuildSettings | grep "DEVELOPMENT_TEAM" || echo "Warning: DEVELOPMENT_TEAM not found in build settings"
+          cd ..
           echo ""
-          echo "Checking for certificates and profiles after setup..."
-          CERT_COUNT=$(security find-identity -v -p codesigning 2>/dev/null | grep -c "JT4YJSSV45" || echo "0")
-          PROFILE_COUNT=$(ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | wc -l || echo "0")
-          
-          echo "Certificates found: $CERT_COUNT"
-          echo "Provisioning profiles found: $PROFILE_COUNT"
-          
-          if [ "$CERT_COUNT" = "0" ] || [ "$PROFILE_COUNT" = "0" ]; then
-            echo ""
-            echo "⚠ WARNING: No certificates or profiles found!"
-            echo "This might mean:"
-            echo "  1. The API key doesn't have permission to create certificates"
-            echo "  2. The API key integration isn't working correctly"
-            echo "  3. Certificates will be created during the build process"
-            echo ""
-            echo "The build will continue, but code signing may fail."
-            echo "Check the API key permissions in Apple Developer portal."
-          else
-            echo "✓ Certificates and profiles found successfully"
-          fi
-          
-          echo ""
-          echo "Code signing setup step completed"
+          echo "CodeMagic will automatically create certificates and provisioning profiles"
+          echo "using the App Store Connect API key during the build process."
           echo "=========================================="
           
       - name: Clean iOS build
