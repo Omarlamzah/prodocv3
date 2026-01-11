@@ -79,7 +79,9 @@ post_install do |installer|
       end
       
       # Remove any file references that might cause Xcode to look for the privacy manifest as a build input
+      # Also remove any output paths that might conflict with our script phase
       target.build_phases.each do |phase|
+        # Remove file references from Copy Bundle Resources and other phases
         if phase.respond_to?(:files)
           files_to_remove = []
           phase.files.to_a.each do |file|
@@ -95,6 +97,15 @@ post_install do |installer|
             end
           end
           files_to_remove.each { |f| phase.files.delete(f) rescue nil }
+        end
+        
+        # Remove output paths that might conflict
+        if phase.respond_to?(:output_paths)
+          phase.output_paths = phase.output_paths.reject { |path| path.to_s.include?('privacy') } rescue nil
+        end
+        
+        if phase.respond_to?(:output_file_list_paths)
+          phase.output_file_list_paths = phase.output_file_list_paths.reject { |path| path.to_s.include?('privacy') } rescue nil
         end
         
         # Also check input file lists
@@ -117,22 +128,12 @@ post_install do |installer|
       unless existing_script
         script_phase = target.new_shell_script_build_phase(script_phase_name)
         
-        # Extract package name from target name for output path declarations
+        # Extract package name from target name
         package_name = target.name.gsub(/_privacy$/i, '').gsub(/_Privacy$/i, '')
         
-        # Declare ALL possible output paths - Xcode needs to know about all files that will be created
-        # This is critical - Xcode checks for these files as build inputs, so we must declare them as outputs
-        output_paths = []
-        # Archive build paths (UNINSTALLED_PRODUCTS_DIR)
-        output_paths << "${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"
-        output_paths << "${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/#{package_name}_privacy"
-        # Regular build paths (BUILT_PRODUCTS_DIR)
-        output_paths << "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"
-        output_paths << "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/#{package_name}_privacy"
-        # Also declare with explicit bundle name format
-        bundle_name = "#{package_name}_privacy.bundle"
-        output_paths << "${UNINSTALLED_PRODUCTS_DIR}/#{bundle_name}/#{package_name}_privacy"
-        output_paths << "${BUILT_PRODUCTS_DIR}/#{bundle_name}/#{package_name}_privacy"
+        # DO NOT declare output paths - this causes "Multiple commands produce" errors
+        # Instead, we'll create the files and Xcode will find them
+        # The files are created as side effects, not as declared outputs
         
         script_phase.shell_script = <<-SCRIPT
           set -e  # Exit on error (but we use || true for non-critical operations)
@@ -148,9 +149,13 @@ post_install do |installer|
           PACKAGE_NAME="#{package_name}"
           echo "Using PACKAGE_NAME: $PACKAGE_NAME"
           
-          # Function to create manifest file
+          # Function to create manifest file (only if it doesn't exist to avoid conflicts)
           create_manifest() {
             local manifest_path="$1"
+            if [ -f "$manifest_path" ]; then
+              echo "File already exists: $manifest_path (skipping)"
+              return
+            fi
             local dir_path=$(dirname "$manifest_path")
             mkdir -p "$dir_path" || true
             touch "$manifest_path" || true
@@ -162,55 +167,36 @@ post_install do |installer|
             fi
           }
           
-          # For archive builds: UNINSTALLED_PRODUCTS_DIR (this is where the error occurs)
+          # Only create files in UNINSTALLED_PRODUCTS_DIR for archive builds
+          # This is where Xcode expects them based on the error messages
+          # Creating in multiple locations causes "Multiple commands produce" errors
           if [ -n "${UNINSTALLED_PRODUCTS_DIR}" ]; then
             echo "Creating files in UNINSTALLED_PRODUCTS_DIR: ${UNINSTALLED_PRODUCTS_DIR}"
             
-            # Create with WRAPPER_NAME (standard format)
+            # Create file using WRAPPER_NAME and TARGET_NAME (standard format)
+            # This matches the error path format: bundle_name/file_name
             ARCHIVE_BUNDLE_PATH="${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}"
             create_manifest "${ARCHIVE_BUNDLE_PATH}/${TARGET_NAME}"
+            
+            # Also try with package name format (some targets use this)
             create_manifest "${ARCHIVE_BUNDLE_PATH}/${PACKAGE_NAME}_privacy"
-            
-            # Also create with explicit bundle name format (sqflite_darwin_privacy.bundle)
-            EXPLICIT_BUNDLE="${UNINSTALLED_PRODUCTS_DIR}/${PACKAGE_NAME}_privacy.bundle"
-            create_manifest "${EXPLICIT_BUNDLE}/${PACKAGE_NAME}_privacy"
-            create_manifest "${EXPLICIT_BUNDLE}/${TARGET_NAME}"
-            
-            echo "Archive files created in: ${UNINSTALLED_PRODUCTS_DIR}"
-            ls -la "${UNINSTALLED_PRODUCTS_DIR}" | grep -i privacy || echo "No privacy bundles found in listing"
           else
-            echo "UNINSTALLED_PRODUCTS_DIR is not set"
-          fi
-          
-          # For regular builds: BUILT_PRODUCTS_DIR
-          if [ -n "${BUILT_PRODUCTS_DIR}" ]; then
-            echo "Creating files in BUILT_PRODUCTS_DIR: ${BUILT_PRODUCTS_DIR}"
-            
-            REGULAR_BUNDLE_PATH="${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
-            create_manifest "${REGULAR_BUNDLE_PATH}/${TARGET_NAME}"
-            create_manifest "${REGULAR_BUNDLE_PATH}/${PACKAGE_NAME}_privacy"
-            
-            EXPLICIT_BUNDLE="${BUILT_PRODUCTS_DIR}/${PACKAGE_NAME}_privacy.bundle"
-            create_manifest "${EXPLICIT_BUNDLE}/${PACKAGE_NAME}_privacy"
-            create_manifest "${EXPLICIT_BUNDLE}/${TARGET_NAME}"
-          else
-            echo "BUILT_PRODUCTS_DIR is not set"
-          fi
-          
-          # Also try TARGET_BUILD_DIR as fallback
-          if [ -n "${TARGET_BUILD_DIR}" ]; then
-            FALLBACK_BUNDLE_PATH="${TARGET_BUILD_DIR}/${WRAPPER_NAME}"
-            create_manifest "${FALLBACK_BUNDLE_PATH}/${TARGET_NAME}"
-            create_manifest "${FALLBACK_BUNDLE_PATH}/${PACKAGE_NAME}_privacy"
+            echo "UNINSTALLED_PRODUCTS_DIR is not set, trying BUILT_PRODUCTS_DIR"
+            # Fallback to BUILT_PRODUCTS_DIR only if UNINSTALLED_PRODUCTS_DIR is not set
+            if [ -n "${BUILT_PRODUCTS_DIR}" ]; then
+              REGULAR_BUNDLE_PATH="${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
+              create_manifest "${REGULAR_BUNDLE_PATH}/${TARGET_NAME}"
+              create_manifest "${REGULAR_BUNDLE_PATH}/${PACKAGE_NAME}_privacy"
+            fi
           fi
           
           echo "Privacy manifest creation completed for ${TARGET_NAME}"
           echo "=========================================="
         SCRIPT
         
-        # Declare the output files so Xcode knows they will be created
-        # This is CRITICAL - Xcode checks for these files as build inputs
-        script_phase.output_paths = output_paths.uniq
+        # DO NOT set output_paths - this causes "Multiple commands produce" errors
+        # The script creates files as side effects, not as declared outputs
+        # Xcode will find the files when they're created
         script_phase.run_only_for_deployment_postprocessing = '0'
         # Ensure script runs early
         script_phase.always_out_of_date = '1'
