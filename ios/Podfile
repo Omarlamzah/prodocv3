@@ -131,74 +131,71 @@ post_install do |installer|
         # Extract package name from target name
         package_name = target.name.gsub(/_privacy$/i, '').gsub(/_Privacy$/i, '')
         
-        # DO NOT declare output paths - this causes "Multiple commands produce" errors
-        # Instead, we'll create the files and Xcode will find them
-        # The files are created as side effects, not as declared outputs
+        # Declare ONLY the specific output path for this target
+        # This tells Xcode the script will create this file, preventing "Build input file cannot be found" errors
+        # We only declare one path per target to avoid "Multiple commands produce" errors
+        output_paths = ["${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"]
         
         script_phase.shell_script = <<-SCRIPT
-          set -e  # Exit on error (but we use || true for non-critical operations)
-          
           # Create privacy manifest file immediately - this MUST run before Xcode checks for inputs
+          # Don't use set -e, we want to continue even if some operations fail
+          
           echo "=========================================="
           echo "Creating privacy manifest for ${TARGET_NAME}..."
           echo "WRAPPER_NAME: ${WRAPPER_NAME}"
           echo "TARGET_NAME: ${TARGET_NAME}"
-          echo "PACKAGE_NAME: #{package_name}"
+          echo "UNINSTALLED_PRODUCTS_DIR: ${UNINSTALLED_PRODUCTS_DIR}"
+          echo "BUILT_PRODUCTS_DIR: ${BUILT_PRODUCTS_DIR}"
           
-          # Extract package name from target (e.g., url_launcher_ios_privacy -> url_launcher_ios)
+          # Extract package name from target
           PACKAGE_NAME="#{package_name}"
-          echo "Using PACKAGE_NAME: $PACKAGE_NAME"
+          echo "PACKAGE_NAME: $PACKAGE_NAME"
           
-          # Function to create manifest file (only if it doesn't exist to avoid conflicts)
+          # Function to create manifest file
           create_manifest() {
             local manifest_path="$1"
-            if [ -f "$manifest_path" ]; then
-              echo "File already exists: $manifest_path (skipping)"
-              return
-            fi
             local dir_path=$(dirname "$manifest_path")
-            mkdir -p "$dir_path" || true
-            touch "$manifest_path" || true
-            chmod 644 "$manifest_path" || true
+            
+            # Create directory if it doesn't exist
+            mkdir -p "$dir_path" 2>/dev/null || true
+            
+            # Create file if it doesn't exist
+            if [ ! -f "$manifest_path" ]; then
+              touch "$manifest_path" 2>/dev/null || true
+              chmod 644 "$manifest_path" 2>/dev/null || true
+            fi
+            
+            # Verify file was created
             if [ -f "$manifest_path" ]; then
-              echo "✓ Created: $manifest_path"
+              echo "✓ Created/verified: $manifest_path"
+              return 0
             else
               echo "✗ Failed to create: $manifest_path"
+              return 1
             fi
           }
           
-          # Only create files in UNINSTALLED_PRODUCTS_DIR for archive builds
-          # This is where Xcode expects them based on the error messages
-          # Creating in multiple locations causes "Multiple commands produce" errors
+          # Create file in UNINSTALLED_PRODUCTS_DIR (for archive builds)
           if [ -n "${UNINSTALLED_PRODUCTS_DIR}" ]; then
-            echo "Creating files in UNINSTALLED_PRODUCTS_DIR: ${UNINSTALLED_PRODUCTS_DIR}"
-            
-            # Create file using WRAPPER_NAME and TARGET_NAME (standard format)
-            # This matches the error path format: bundle_name/file_name
             ARCHIVE_BUNDLE_PATH="${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}"
-            create_manifest "${ARCHIVE_BUNDLE_PATH}/${TARGET_NAME}"
-            
-            # Also try with package name format (some targets use this)
-            create_manifest "${ARCHIVE_BUNDLE_PATH}/${PACKAGE_NAME}_privacy"
-          else
-            echo "UNINSTALLED_PRODUCTS_DIR is not set, trying BUILT_PRODUCTS_DIR"
-            # Fallback to BUILT_PRODUCTS_DIR only if UNINSTALLED_PRODUCTS_DIR is not set
-            if [ -n "${BUILT_PRODUCTS_DIR}" ]; then
-              REGULAR_BUNDLE_PATH="${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
-              create_manifest "${REGULAR_BUNDLE_PATH}/${TARGET_NAME}"
-              create_manifest "${REGULAR_BUNDLE_PATH}/${PACKAGE_NAME}_privacy"
-            fi
+            create_manifest "${ARCHIVE_BUNDLE_PATH}/${TARGET_NAME}" || true
+          fi
+          
+          # Also create in BUILT_PRODUCTS_DIR (for regular builds)
+          if [ -n "${BUILT_PRODUCTS_DIR}" ]; then
+            REGULAR_BUNDLE_PATH="${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
+            create_manifest "${REGULAR_BUNDLE_PATH}/${TARGET_NAME}" || true
           fi
           
           echo "Privacy manifest creation completed for ${TARGET_NAME}"
           echo "=========================================="
         SCRIPT
         
-        # DO NOT set output_paths - this causes "Multiple commands produce" errors
-        # The script creates files as side effects, not as declared outputs
-        # Xcode will find the files when they're created
+        # Declare the output path so Xcode knows this script creates the file
+        # This prevents "Build input file cannot be found" errors
+        script_phase.output_paths = output_paths
         script_phase.run_only_for_deployment_postprocessing = '0'
-        # Ensure script runs early
+        # Ensure script runs early and always
         script_phase.always_out_of_date = '1'
         
         # CRITICAL: Move script phase to the VERY BEGINNING to run before Xcode checks for inputs
