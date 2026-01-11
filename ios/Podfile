@@ -224,7 +224,6 @@ echo "[Privacy] Completed for ${TARGET}"
         end
       end
     end
-    end
   end
   
   # Ensure Swift Package Manager dependencies are resolved and disable sandboxing
