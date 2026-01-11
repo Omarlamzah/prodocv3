@@ -61,7 +61,7 @@ post_install do |installer|
                        wrapper_name.include?('privacy')
     
     if is_privacy_bundle || (target.respond_to?(:product_type) && target.product_type == 'com.apple.product-type.bundle')
-      puts "Processing privacy bundle target: #{target.name}"
+      puts "Processing privacy bundle target: #{target.name} (is_privacy_bundle: #{is_privacy_bundle})"
       target.build_configurations.each do |config|
         config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
         config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
@@ -122,70 +122,75 @@ post_install do |installer|
       # Add script phase to create the privacy manifest file during build
       # The file name should match the target name (e.g., url_launcher_ios_privacy)
       script_phase_name = 'Create Privacy Manifest File'
-      # Check if script phase already exists
-      existing_script = target.shell_script_build_phases.find { |phase| phase.name == script_phase_name }
+      # Remove any existing script phase with this name first
+      existing_scripts = target.shell_script_build_phases.select { |phase| phase.name == script_phase_name }
+      existing_scripts.each { |phase| target.build_phases.delete(phase) rescue nil }
       
-      unless existing_script
-        script_phase = target.new_shell_script_build_phase(script_phase_name)
-        
-        # Extract package name from target name
-        package_name = target.name.gsub(/_privacy$/i, '').gsub(/_Privacy$/i, '')
-        
-        # Declare the output path - this tells Xcode the script will create this file
-        # The path format must match exactly what Xcode expects
-        output_paths = ["${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"]
-        
-        script_phase.shell_script = <<-SCRIPT
-          # Create privacy manifest file - MUST run before Xcode checks for inputs
-          
-          echo "=========================================="
-          echo "[Privacy Manifest] Target: ${TARGET_NAME}"
-          echo "WRAPPER_NAME: ${WRAPPER_NAME}"
-          echo "TARGET_NAME: ${TARGET_NAME}"
-          
-          # Create the file in UNINSTALLED_PRODUCTS_DIR (archive builds)
-          if [ -n "${UNINSTALLED_PRODUCTS_DIR}" ]; then
-            ARCHIVE_PATH="${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}"
-            ARCHIVE_FILE="${ARCHIVE_PATH}/${TARGET_NAME}"
-            
-            # Create directory structure
-            mkdir -p "${ARCHIVE_PATH}" 2>/dev/null || true
-            
-            # Create the file
-            touch "${ARCHIVE_FILE}" 2>/dev/null || true
-            chmod 644 "${ARCHIVE_FILE}" 2>/dev/null || true
-            
-            if [ -f "${ARCHIVE_FILE}" ]; then
-              echo "✓ Created: ${ARCHIVE_FILE}"
-            else
-              echo "✗ Failed: ${ARCHIVE_FILE}"
-            fi
-          fi
-          
-          # Also create in BUILT_PRODUCTS_DIR (regular builds)
-          if [ -n "${BUILT_PRODUCTS_DIR}" ]; then
-            REGULAR_PATH="${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
-            REGULAR_FILE="${REGULAR_PATH}/${TARGET_NAME}"
-            
-            mkdir -p "${REGULAR_PATH}" 2>/dev/null || true
-            touch "${REGULAR_FILE}" 2>/dev/null || true
-            chmod 644 "${REGULAR_FILE}" 2>/dev/null || true
-            
-            if [ -f "${REGULAR_FILE}" ]; then
-              echo "✓ Created: ${REGULAR_FILE}"
-            fi
-          fi
-          
-          echo "=========================================="
+      # Create new script phase
+      script_phase = target.new_shell_script_build_phase(script_phase_name)
+      
+      # Extract package name from target name
+      package_name = target.name.gsub(/_privacy$/i, '').gsub(/_Privacy$/i, '')
+      
+      # Declare the output path - CRITICAL: This tells Xcode the script creates this file
+      # Must match the exact path format Xcode expects
+      output_paths = ["${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"]
+      
+      script_phase.shell_script = <<-SCRIPT
+#!/bin/bash
+# Create privacy manifest file - runs before Xcode checks for build inputs
+
+set -u  # Treat unset variables as error (but we check for them)
+
+TARGET="${TARGET_NAME}"
+WRAPPER="${WRAPPER_NAME}"
+
+echo "[Privacy] Creating manifest for ${TARGET} in ${WRAPPER}"
+
+# Create file in UNINSTALLED_PRODUCTS_DIR (archive builds - this is where the error occurs)
+if [ -n "${UNINSTALLED_PRODUCTS_DIR:-}" ]; then
+  ARCHIVE_DIR="${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER}"
+  ARCHIVE_FILE="${ARCHIVE_DIR}/${TARGET}"
+  
+  # Force create directory and file
+  mkdir -p "${ARCHIVE_DIR}"
+  echo "" > "${ARCHIVE_FILE}" 2>/dev/null || touch "${ARCHIVE_FILE}"
+  chmod 644 "${ARCHIVE_FILE}"
+  
+  if [ -f "${ARCHIVE_FILE}" ]; then
+    echo "[Privacy] ✓ Created: ${ARCHIVE_FILE}"
+  else
+    echo "[Privacy] ✗ FAILED to create: ${ARCHIVE_FILE}"
+    exit 1
+  fi
+else
+  echo "[Privacy] UNINSTALLED_PRODUCTS_DIR not set"
+fi
+
+# Also create in BUILT_PRODUCTS_DIR (regular builds)
+if [ -n "${BUILT_PRODUCTS_DIR:-}" ]; then
+  REGULAR_DIR="${BUILT_PRODUCTS_DIR}/${WRAPPER}"
+  REGULAR_FILE="${REGULAR_DIR}/${TARGET}"
+  
+  mkdir -p "${REGULAR_DIR}"
+  echo "" > "${REGULAR_FILE}" 2>/dev/null || touch "${REGULAR_FILE}"
+  chmod 644 "${REGULAR_FILE}"
+  
+  if [ -f "${REGULAR_FILE}" ]; then
+    echo "[Privacy] ✓ Created: ${REGULAR_FILE}"
+  fi
+fi
+
+echo "[Privacy] Completed for ${TARGET}"
         SCRIPT
-        
-        # Declare output path - CRITICAL: This tells Xcode the file will be created
-        script_phase.output_paths = output_paths
-        script_phase.run_only_for_deployment_postprocessing = '0'
-        script_phase.always_out_of_date = '1'
-        # Set input file list to empty to prevent Xcode from looking for the file as input
-        script_phase.input_file_list_paths = []
-        script_phase.input_paths = []
+      
+      # CRITICAL: Declare output path so Xcode knows this script creates the file
+      script_phase.output_paths = output_paths
+      script_phase.run_only_for_deployment_postprocessing = '0'
+      script_phase.always_out_of_date = '1'
+      # Ensure no inputs are declared
+      script_phase.input_file_list_paths = [] rescue nil
+      script_phase.input_paths = [] rescue nil
         
         # CRITICAL: Move script phase to the VERY BEGINNING to run before Xcode checks for inputs
         # This must run before any Copy Bundle Resources or other phases
@@ -203,7 +208,9 @@ post_install do |installer|
           target.build_phases.clear
           all_phases.each { |p| target.build_phases << p }
           
-          puts "  ✓ Script phase moved to beginning for #{target.name} (position: #{target.build_phases.index(script_phase)})"
+          position = target.build_phases.index(script_phase)
+          puts "  ✓ Script phase moved to beginning for #{target.name} (position: #{position || 'unknown'})"
+          puts "  ✓ Output path declared: ${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"
         rescue => e
           puts "  ⚠ Could not reorder build phases for #{target.name}: #{e.message}"
           # Fallback: try to add at beginning
