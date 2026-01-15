@@ -133,15 +133,20 @@ post_install do |installer|
       package_name = target.name.gsub(/_privacy$/i, '').gsub(/_Privacy$/i, '')
       
       # Declare the output path - CRITICAL: This tells Xcode the script creates this file
-      # Must match the exact path format Xcode expects
-      output_paths = ["${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"]
+      # The path format must match exactly what Xcode expects as a build input
+      # Format: ${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}
+      # For privacy bundles: ${UNINSTALLED_PRODUCTS_DIR}/url_launcher_ios_privacy.bundle/url_launcher_ios_privacy
+      # Use both UNINSTALLED_PRODUCTS_DIR and BUILT_PRODUCTS_DIR to cover all build scenarios
+      output_paths = [
+        "${UNINSTALLED_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}",
+        "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/${TARGET_NAME}"
+      ]
       
       script_phase.shell_script = <<-SCRIPT
 #!/bin/bash
+set -euo pipefail
+
 # Create privacy manifest file - runs before Xcode checks for build inputs
-
-set -u  # Treat unset variables as error (but we check for them)
-
 TARGET="${TARGET_NAME}"
 WRAPPER="${WRAPPER_NAME}"
 
@@ -154,7 +159,7 @@ if [ -n "${UNINSTALLED_PRODUCTS_DIR:-}" ]; then
   
   # Force create directory and file
   mkdir -p "${ARCHIVE_DIR}"
-  echo "" > "${ARCHIVE_FILE}" 2>/dev/null || touch "${ARCHIVE_FILE}"
+  touch "${ARCHIVE_FILE}"
   chmod 644 "${ARCHIVE_FILE}"
   
   if [ -f "${ARCHIVE_FILE}" ]; then
@@ -163,8 +168,6 @@ if [ -n "${UNINSTALLED_PRODUCTS_DIR:-}" ]; then
     echo "[Privacy] ✗ FAILED to create: ${ARCHIVE_FILE}"
     exit 1
   fi
-else
-  echo "[Privacy] UNINSTALLED_PRODUCTS_DIR not set"
 fi
 
 # Also create in BUILT_PRODUCTS_DIR (regular builds)
@@ -173,7 +176,7 @@ if [ -n "${BUILT_PRODUCTS_DIR:-}" ]; then
   REGULAR_FILE="${REGULAR_DIR}/${TARGET}"
   
   mkdir -p "${REGULAR_DIR}"
-  echo "" > "${REGULAR_FILE}" 2>/dev/null || touch "${REGULAR_FILE}"
+  touch "${REGULAR_FILE}"
   chmod 644 "${REGULAR_FILE}"
   
   if [ -f "${REGULAR_FILE}" ]; then
@@ -184,7 +187,8 @@ fi
 echo "[Privacy] Completed for ${TARGET}"
         SCRIPT
       
-      # CRITICAL: Declare output path so Xcode knows this script creates the file
+      # CRITICAL: Declare output paths so Xcode knows this script creates the files
+      # This must be set as an array
       script_phase.output_paths = output_paths
       script_phase.run_only_for_deployment_postprocessing = '0'
       script_phase.always_out_of_date = '1'
