@@ -30,26 +30,51 @@ workflows:
     scripts:
       - name: Set up code signing
         script: |
-          # Codemagic will automatically handle code signing using the App Store Connect API key
-          # configured in the integrations section: myappkey_admin_forcodemajic
-          echo "Setting up code signing..."
+          # Codemagic automatically handles code signing using the App Store Connect API key
+          # This step just verifies the setup and ensures the Xcode project is configured correctly
+          echo "=========================================="
+          echo "Verifying code signing setup..."
+          echo "=========================================="
           echo "Team ID: JT4YJSSV45"
           echo "Bundle ID: com.nextpital.prodoc"
-          echo "API Key: myappkey_admin_forcodemajic (configured in integrations)"
+          echo ""
           
-          # Initialize keychain
-          keychain initialize
-          
-          # Fetch certificates and profiles using App Store Connect API key
-          # This should be done automatically by Codemagic, but we'll ensure it happens
-          app-store-connect fetch-signing-files com.nextpital.prodoc --type IOS_APP_STORE --create || {
-            echo "Note: Certificates/profiles may already exist or will be created during build"
-          }
-          
-          # Verify Xcode project has correct team ID
+          # Codemagic automatically runs keychain initialize and fetches signing files
+          # We just need to verify the Xcode project is configured correctly
           cd ios
-          xcodebuild -project Runner.xcodeproj -target Runner -showBuildSettings | grep "DEVELOPMENT_TEAM" | head -1
+          
+          # Check Xcode project settings
+          echo "Xcode project code signing settings:"
+          xcodebuild -project Runner.xcodeproj -target Runner -showBuildSettings 2>/dev/null | grep -E "DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY" | head -5 || true
+          
+          # Ensure automatic signing is enabled
+          # The project should already have DEVELOPMENT_TEAM set, but we verify it
+          TEAM_ID=$(xcodebuild -project Runner.xcodeproj -target Runner -showBuildSettings 2>/dev/null | grep "DEVELOPMENT_TEAM" | head -1 | sed 's/.*= *//' | tr -d ' ' || echo "")
+          if [ "$TEAM_ID" = "JT4YJSSV45" ]; then
+            echo "✓ DEVELOPMENT_TEAM is correctly set: $TEAM_ID"
+          else
+            echo "⚠ DEVELOPMENT_TEAM: $TEAM_ID (expected: JT4YJSSV45)"
+          fi
+          
           cd ..
+          
+          # Check if certificates and profiles are available (set up by Codemagic automatically)
+          echo ""
+          echo "Code signing resources:"
+          CERT_COUNT=$(security find-identity -v -p codesigning 2>/dev/null | grep -c "JT4YJSSV45" || echo "0")
+          PROFILE_COUNT=$(ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | wc -l || echo "0")
+          echo "Certificates in keychain: $CERT_COUNT"
+          echo "Provisioning profiles: $PROFILE_COUNT"
+          
+          if [ "$PROFILE_COUNT" -gt "0" ]; then
+            echo "Available profiles:"
+            ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | head -3 || true
+          fi
+          
+          echo ""
+          echo "Code signing verification completed."
+          echo "Codemagic will handle code signing automatically during the build."
+          echo "=========================================="
           
       - name: Clean iOS build
         script: |
@@ -328,8 +353,36 @@ workflows:
           # Create privacy manifests one more time right before build
           /tmp/pre_build_privacy_manifests.sh
           
-          # Build using flutter build ipa
-          # The Podfile script phases should create privacy manifests during build
+          # Ensure profiles are available before build
+          echo "Checking for provisioning profiles..."
+          if [ -d ~/Library/MobileDevice/Provisioning\ Profiles ]; then
+            echo "Provisioning profiles directory exists"
+            PROFILE_COUNT=$(ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | wc -l || echo "0")
+            echo "Found $PROFILE_COUNT provisioning profile(s)"
+            if [ "$PROFILE_COUNT" -gt "0" ]; then
+              echo "Profile details:"
+              ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | head -3 | while read profile; do
+                echo "  - $(basename "$profile")"
+                # Check if it's for our bundle ID
+                if security cms -D -i "$profile" 2>/dev/null | grep -q "com.nextpital.prodoc"; then
+                  echo "    ✓ Matches bundle ID com.nextpital.prodoc"
+                fi
+              done
+            fi
+          else
+            echo "⚠ Provisioning profiles directory not found"
+          fi
+          
+          # Check certificates
+          echo ""
+          echo "Checking code signing certificates..."
+          security find-identity -v -p codesigning 2>/dev/null | grep "JT4YJSSV45" || echo "No certificates found for team JT4YJSSV45"
+          
+          # Build using flutter build ipa with release mode
+          # Codemagic should handle code signing automatically via the App Store Connect API key
+          # The export options will be generated automatically by Codemagic
+          echo ""
+          echo "Starting Flutter build..."
           flutter build ipa --release 2>&1 | tee /tmp/flutter_build.log || BUILD_FAILED=1
           
           # If build failed, try to create files and retry once
