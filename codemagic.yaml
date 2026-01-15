@@ -379,37 +379,28 @@ workflows:
           fi
           
           # Create a wrapper script that creates privacy manifests before each Xcode invocation
-          cat > /tmp/pre_build_privacy_manifests.sh << 'EOFSCRIPT'
-#!/bin/bash
-# This script creates privacy manifests before Xcode builds
-DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
-CRITICAL_PACKAGES="url_launcher_ios sqflite_darwin"
-
-create_privacy_files() {
-  local base_dir=$1
-  if [ -z "$base_dir" ] || [ ! -d "$(dirname "$base_dir")" ]; then
-    return 0
-  fi
-  
-  mkdir -p "$base_dir"
-  for package in $CRITICAL_PACKAGES; do
-    BUNDLE_DIR="${base_dir}/${package}_privacy.bundle"
-    mkdir -p "$BUNDLE_DIR"
-    touch "${BUNDLE_DIR}/${package}_privacy"
-    chmod 644 "${BUNDLE_DIR}/${package}_privacy"
-  done
-}
-
-# Create in all Runner-* directories
-if [ -d "$DERIVED_DATA_BASE" ]; then
-  for runner_dir in "$DERIVED_DATA_BASE"/Runner-*; do
-    if [ -d "$runner_dir" ]; then
-      uninstalled_dir="${runner_dir}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
-      create_privacy_files "$uninstalled_dir"
-    fi
-  done
-fi
-EOFSCRIPT
+          echo '#!/bin/bash' > /tmp/pre_build_privacy_manifests.sh
+          echo 'DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"' >> /tmp/pre_build_privacy_manifests.sh
+          echo 'CRITICAL_PACKAGES="url_launcher_ios sqflite_darwin"' >> /tmp/pre_build_privacy_manifests.sh
+          echo 'create_privacy_files() {' >> /tmp/pre_build_privacy_manifests.sh
+          echo '  local base_dir=$1' >> /tmp/pre_build_privacy_manifests.sh
+          echo '  if [ -z "$base_dir" ] || [ ! -d "$(dirname "$base_dir")" ]; then return 0; fi' >> /tmp/pre_build_privacy_manifests.sh
+          echo '  mkdir -p "$base_dir"' >> /tmp/pre_build_privacy_manifests.sh
+          echo '  for package in $CRITICAL_PACKAGES; do' >> /tmp/pre_build_privacy_manifests.sh
+          echo '    BUNDLE_DIR="${base_dir}/${package}_privacy.bundle"' >> /tmp/pre_build_privacy_manifests.sh
+          echo '    mkdir -p "$BUNDLE_DIR"' >> /tmp/pre_build_privacy_manifests.sh
+          echo '    touch "${BUNDLE_DIR}/${package}_privacy"' >> /tmp/pre_build_privacy_manifests.sh
+          echo '    chmod 644 "${BUNDLE_DIR}/${package}_privacy"' >> /tmp/pre_build_privacy_manifests.sh
+          echo '  done' >> /tmp/pre_build_privacy_manifests.sh
+          echo '}' >> /tmp/pre_build_privacy_manifests.sh
+          echo 'if [ -d "$DERIVED_DATA_BASE" ]; then' >> /tmp/pre_build_privacy_manifests.sh
+          echo '  for runner_dir in "$DERIVED_DATA_BASE"/Runner-*; do' >> /tmp/pre_build_privacy_manifests.sh
+          echo '    if [ -d "$runner_dir" ]; then' >> /tmp/pre_build_privacy_manifests.sh
+          echo '      uninstalled_dir="${runner_dir}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"' >> /tmp/pre_build_privacy_manifests.sh
+          echo '      create_privacy_files "$uninstalled_dir"' >> /tmp/pre_build_privacy_manifests.sh
+          echo '    fi' >> /tmp/pre_build_privacy_manifests.sh
+          echo '  done' >> /tmp/pre_build_privacy_manifests.sh
+          echo 'fi' >> /tmp/pre_build_privacy_manifests.sh
           chmod +x /tmp/pre_build_privacy_manifests.sh
           
           # Build IPA - use xcodebuild directly to have more control
