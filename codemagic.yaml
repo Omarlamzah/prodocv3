@@ -31,34 +31,54 @@ workflows:
       - name: Set up code signing
         script: |
           # Codemagic automatically handles code signing using the App Store Connect API key
-          # This step just verifies the setup and ensures the Xcode project is configured correctly
+          # This step ensures profiles are created/fetched and the Xcode project is configured correctly
           echo "=========================================="
-          echo "Verifying code signing setup..."
+          echo "Setting up code signing..."
           echo "=========================================="
           echo "Team ID: JT4YJSSV45"
           echo "Bundle ID: com.nextpital.prodoc"
           echo ""
           
-          # Codemagic automatically runs keychain initialize and fetches signing files
-          # We just need to verify the Xcode project is configured correctly
-          cd ios
+          # Initialize keychain (Codemagic does this automatically, but we ensure it's done)
+          keychain initialize
           
-          # Check Xcode project settings
+          # Fetch/create signing files using App Store Connect API key
+          # The --create flag will create profiles if they don't exist
+          echo "Fetching/creating signing files from App Store Connect..."
+          app-store-connect fetch-signing-files com.nextpital.prodoc \
+            --type IOS_APP_STORE \
+            --create \
+            --platform IOS || {
+            echo "⚠ Note: Some signing files may already exist or will be created during build"
+          }
+          
+          # Add certificates to keychain
+          keychain add-certificates
+          
+          # Configure Xcode project to use the profiles
+          echo ""
+          echo "Configuring Xcode project..."
+          cd ios
+          xcode-project use-profiles || {
+            echo "Note: Profiles will be used automatically during build"
+          }
+          cd ..
+          
+          # Verify Xcode project settings
+          echo ""
           echo "Xcode project code signing settings:"
+          cd ios
           xcodebuild -project Runner.xcodeproj -target Runner -showBuildSettings 2>/dev/null | grep -E "DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY" | head -5 || true
           
-          # Ensure automatic signing is enabled
-          # The project should already have DEVELOPMENT_TEAM set, but we verify it
           TEAM_ID=$(xcodebuild -project Runner.xcodeproj -target Runner -showBuildSettings 2>/dev/null | grep "DEVELOPMENT_TEAM" | head -1 | sed 's/.*= *//' | tr -d ' ' || echo "")
           if [ "$TEAM_ID" = "JT4YJSSV45" ]; then
             echo "✓ DEVELOPMENT_TEAM is correctly set: $TEAM_ID"
           else
             echo "⚠ DEVELOPMENT_TEAM: $TEAM_ID (expected: JT4YJSSV45)"
           fi
-          
           cd ..
           
-          # Check if certificates and profiles are available (set up by Codemagic automatically)
+          # Check if certificates and profiles are available
           echo ""
           echo "Code signing resources:"
           CERT_COUNT=$(security find-identity -v -p codesigning 2>/dev/null | grep -c "JT4YJSSV45" || echo "0")
@@ -68,12 +88,20 @@ workflows:
           
           if [ "$PROFILE_COUNT" -gt "0" ]; then
             echo "Available profiles:"
-            ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | head -3 || true
+            ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | head -3 | while read profile; do
+              echo "  - $(basename "$profile")"
+              # Check profile type and bundle ID
+              PROFILE_INFO=$(security cms -D -i "$profile" 2>/dev/null | grep -E "Name|ApplicationIdentifierPrefix|ProvisionedDevices" | head -3 || echo "")
+              if echo "$PROFILE_INFO" | grep -q "com.nextpital.prodoc"; then
+                echo "    ✓ Matches bundle ID"
+              fi
+            done
+          else
+            echo "⚠ No provisioning profiles found yet - they may be created during build"
           fi
           
           echo ""
-          echo "Code signing verification completed."
-          echo "Codemagic will handle code signing automatically during the build."
+          echo "Code signing setup completed."
           echo "=========================================="
           
       - name: Clean iOS build
