@@ -37,6 +37,23 @@ workflows:
           echo "=========================================="
           echo "Team ID: JT4YJSSV45"
           echo "Bundle ID: com.nextpital.prodoc"
+          echo "API Key Integration: myappkey_admin_forcodemajic"
+          echo ""
+          
+          # Check if API key environment variables are available
+          if [ -z "$APP_STORE_CONNECT_API_KEY_ID" ] && [ -z "$APP_STORE_CONNECT_ISSUER_ID" ]; then
+            echo "⚠ WARNING: App Store Connect API key environment variables not detected"
+            echo "  This might mean the API key integration isn't working"
+            echo "  Check Codemagic UI → Integrations → App Store Connect"
+          else
+            echo "✓ App Store Connect API key environment variables detected"
+            if [ -n "$APP_STORE_CONNECT_API_KEY_ID" ]; then
+              echo "  Key ID: $APP_STORE_CONNECT_API_KEY_ID"
+            fi
+            if [ -n "$APP_STORE_CONNECT_ISSUER_ID" ]; then
+              echo "  Issuer ID: $APP_STORE_CONNECT_ISSUER_ID"
+            fi
+          fi
           echo ""
           
           # Initialize keychain (Codemagic does this automatically, but we ensure it's done)
@@ -45,15 +62,39 @@ workflows:
           # Fetch/create signing files using App Store Connect API key
           # The --create flag will create profiles if they don't exist
           echo "Fetching/creating signing files from App Store Connect..."
+          echo "This may take a moment..."
           app-store-connect fetch-signing-files com.nextpital.prodoc \
             --type IOS_APP_STORE \
             --create \
-            --platform IOS || {
-            echo "⚠ Note: Some signing files may already exist or will be created during build"
+            --platform IOS 2>&1 | tee /tmp/fetch_signing.log || {
+            echo "⚠ Warning: fetch-signing-files had issues"
+            echo "Checking log:"
+            tail -20 /tmp/fetch_signing.log || true
           }
           
           # Add certificates to keychain
-          keychain add-certificates
+          echo ""
+          echo "Adding certificates to keychain..."
+          keychain add-certificates 2>&1 | tee /tmp/add_certs.log || {
+            echo "⚠ Warning: add-certificates had issues"
+            echo "Checking log:"
+            tail -20 /tmp/add_certs.log || true
+          }
+          
+          # Verify certificates were added
+          echo ""
+          echo "Verifying certificates in keychain..."
+          CERT_COUNT=$(security find-identity -v -p codesigning 2>/dev/null | grep -c "JT4YJSSV45" || echo "0")
+          if [ "$CERT_COUNT" -eq "0" ]; then
+            echo "⚠ WARNING: No certificates found for team JT4YJSSV45"
+            echo "Listing all certificates:"
+            security find-identity -v -p codesigning 2>/dev/null | head -10 || true
+            echo ""
+            echo "Checking certificate files:"
+            ls -la ~/Library/MobileDevice/Certificates/ 2>/dev/null || echo "No certificate files found"
+          else
+            echo "✓ Found $CERT_COUNT certificate(s) for team JT4YJSSV45"
+          fi
           
           # Configure Xcode project to use the profiles
           echo ""
@@ -102,7 +143,36 @@ workflows:
           
           echo ""
           echo "Code signing setup completed."
-          echo "=========================================="
+          
+          # Final check - if no certificates found, provide guidance
+          FINAL_CERT_COUNT=$(security find-identity -v -p codesigning 2>/dev/null | grep -c "JT4YJSSV45" || echo "0")
+          if [ "$FINAL_CERT_COUNT" -eq "0" ]; then
+            echo ""
+            echo "=========================================="
+            echo "⚠ CODE SIGNING SETUP ISSUE DETECTED"
+            echo "=========================================="
+            echo "No certificates found for team JT4YJSSV45"
+            echo ""
+            echo "Possible solutions:"
+            echo "1. Verify API key permissions in App Store Connect:"
+            echo "   - Go to App Store Connect → Users and Access → Keys"
+            echo "   - Check that your API key has 'Admin' access"
+            echo "   - Ensure it has 'Certificate Management' permission"
+            echo ""
+            echo "2. Verify bundle ID exists in App Store Connect:"
+            echo "   - Go to App Store Connect → My Apps"
+            echo "   - Ensure app with bundle ID 'com.nextpital.prodoc' exists"
+            echo ""
+            echo "3. Manual certificate upload (alternative):"
+            echo "   - Go to Codemagic UI → Your App → Code signing"
+            echo "   - Upload certificates and profiles manually"
+            echo ""
+            echo "4. Check Codemagic integration:"
+            echo "   - Go to Codemagic UI → Integrations → App Store Connect"
+            echo "   - Verify 'myappkey_admin_forcodemajic' is correctly configured"
+            echo "=========================================="
+          fi
+          echo ""
           
       - name: Clean iOS build
         script: |
