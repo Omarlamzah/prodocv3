@@ -236,6 +236,110 @@ echo "[Privacy] Completed for ${TARGET}"
     config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
   end
   
+  # Add script phase to Runner target to create privacy manifests BEFORE build
+  # This is critical because Xcode checks for these files before pod targets are built
+  begin
+    require 'xcodeproj'
+    project_path = File.join(File.dirname(__FILE__), 'Runner.xcodeproj')
+    if File.exist?(project_path)
+      project = Xcodeproj::Project.open(project_path)
+      runner_target = project.targets.find { |t| t.name == 'Runner' }
+      
+      if runner_target
+      script_phase_name = 'Create Privacy Manifests'
+      # Remove existing script phase if it exists
+      existing_phase = runner_target.shell_script_build_phases.find { |p| p.name == script_phase_name }
+      runner_target.build_phases.delete(existing_phase) if existing_phase
+      
+      # Create new script phase
+      script_phase = runner_target.new_shell_script_build_phase(script_phase_name)
+      script_phase.shell_script = <<-SCRIPT
+set -euo pipefail
+
+# Create privacy manifest files for all packages that need them
+PACKAGES="url_launcher_ios sqflite_darwin shared_preferences_foundation path_provider_foundation flutter_secure_storage flutter_local_notifications share_plus"
+
+create_manifest() {
+  local pkg=$1
+  local base_dir=$2
+  
+  if [ -z "$pkg" ] || [ -z "$base_dir" ]; then
+    return
+  fi
+  
+  BUNDLE_DIR="${base_dir}/${pkg}_privacy.bundle"
+  mkdir -p "$BUNDLE_DIR"
+  touch "${BUNDLE_DIR}/${pkg}_privacy"
+  chmod 644 "${BUNDLE_DIR}/${pkg}_privacy"
+  echo "[Privacy] Created: ${BUNDLE_DIR}/${pkg}_privacy"
+}
+
+# Create in UNINSTALLED_PRODUCTS_DIR (for archive builds - this is where the error occurs)
+if [ -n "${UNINSTALLED_PRODUCTS_DIR:-}" ]; then
+  for pkg in $PACKAGES; do
+    create_manifest "$pkg" "${UNINSTALLED_PRODUCTS_DIR}"
+  done
+fi
+
+# Create in BUILT_PRODUCTS_DIR (for regular builds)
+if [ -n "${BUILT_PRODUCTS_DIR:-}" ]; then
+  for pkg in $PACKAGES; do
+    create_manifest "$pkg" "${BUILT_PRODUCTS_DIR}"
+  done
+fi
+
+# Also create in DerivedData locations (fallback)
+DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
+if [ -d "$DERIVED_DATA_BASE" ]; then
+  for runner_dir in "$DERIVED_DATA_BASE"/Runner-*; do
+    if [ -d "$runner_dir" ]; then
+      uninstalled_dir="${runner_dir}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
+      if [ -d "$(dirname "$uninstalled_dir")" ]; then
+        mkdir -p "$uninstalled_dir"
+        for pkg in $PACKAGES; do
+          create_manifest "$pkg" "$uninstalled_dir"
+        done
+      fi
+    fi
+  done
+fi
+      SCRIPT
+      
+      # Declare output paths so Xcode knows these files are created
+      output_paths = []
+      ['url_launcher_ios', 'sqflite_darwin', 'shared_preferences_foundation', 
+       'path_provider_foundation', 'flutter_secure_storage', 
+       'flutter_local_notifications', 'share_plus'].each do |pkg|
+        output_paths << "${UNINSTALLED_PRODUCTS_DIR}/${pkg}_privacy.bundle/${pkg}_privacy"
+        output_paths << "${BUILT_PRODUCTS_DIR}/${pkg}_privacy.bundle/${pkg}_privacy"
+      end
+      script_phase.output_paths = output_paths
+      script_phase.run_only_for_deployment_postprocessing = '0'
+      script_phase.always_out_of_date = '1'
+      
+      # Move script phase to the VERY BEGINNING (before Flutter build script)
+      all_phases = runner_target.build_phases.to_a
+      all_phases.delete(script_phase)
+      all_phases.unshift(script_phase)
+      runner_target.build_phases.clear
+      all_phases.each { |p| runner_target.build_phases << p }
+      
+      project.save
+      puts "✓ Added 'Create Privacy Manifests' script phase to Runner target (runs first)"
+      else
+        puts "⚠ Runner target not found in Xcode project"
+      end
+    else
+      puts "⚠ Runner.xcodeproj not found"
+    end
+  rescue LoadError => e
+    puts "⚠ xcodeproj gem not available: #{e.message}"
+    puts "  Install with: gem install xcodeproj"
+  rescue => e
+    puts "⚠ Failed to add script phase to Runner target: #{e.message}"
+    puts "  #{e.backtrace.first}"
+  end
+  
   # Create placeholder privacy manifest files after pod install
   # This ensures they exist before Xcode checks for them as build inputs
   require 'fileutils'

@@ -154,6 +154,8 @@ workflows:
           cd ios
           pod deintegrate || true
           pod cache clean --all || true
+          # Ensure xcodeproj gem is available for Podfile script
+          gem install xcodeproj || true
           pod install --repo-update
           cd ..
           
@@ -306,6 +308,26 @@ workflows:
           
           # Create privacy manifests before build
           create_privacy_manifests
+          
+          # Final safety check: Create files right before build starts
+          # This ensures they exist even if script phases don't run
+          echo "Final check: Creating privacy manifests in all possible locations..."
+          DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
+          if [ -d "$DERIVED_DATA_BASE" ]; then
+            for runner_dir in "$DERIVED_DATA_BASE"/Runner-*; do
+              if [ -d "$runner_dir" ]; then
+                uninstalled_dir="${runner_dir}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
+                mkdir -p "$uninstalled_dir"
+                for package in url_launcher_ios sqflite_darwin; do
+                  BUNDLE_DIR="${uninstalled_dir}/${package}_privacy.bundle"
+                  mkdir -p "$BUNDLE_DIR"
+                  touch "${BUNDLE_DIR}/${package}_privacy" || true
+                  chmod 644 "${BUNDLE_DIR}/${package}_privacy" || true
+                  echo "Created: ${BUNDLE_DIR}/${package}_privacy"
+                done
+              fi
+            done
+          fi
           
           # Build IPA - use xcodebuild directly to have more control
           # This allows us to inject a pre-build script
