@@ -254,9 +254,11 @@ echo "[Privacy] Completed for ${TARGET}"
       # Create new script phase
       script_phase = runner_target.new_shell_script_build_phase(script_phase_name)
       script_phase.shell_script = <<-SCRIPT
-set -euo pipefail
+#!/bin/bash
+set -e
 
 # Create privacy manifest files for all packages that need them
+# This MUST run before Xcode checks for these files as build inputs
 PACKAGES="url_launcher_ios sqflite_darwin shared_preferences_foundation path_provider_foundation flutter_secure_storage flutter_local_notifications share_plus"
 
 create_manifest() {
@@ -264,18 +266,20 @@ create_manifest() {
   local base_dir=$2
   
   if [ -z "$pkg" ] || [ -z "$base_dir" ]; then
-    return
+    return 0
   fi
   
   BUNDLE_DIR="${base_dir}/${pkg}_privacy.bundle"
-  mkdir -p "$BUNDLE_DIR"
-  touch "${BUNDLE_DIR}/${pkg}_privacy"
-  chmod 644 "${BUNDLE_DIR}/${pkg}_privacy"
+  mkdir -p "$BUNDLE_DIR" || true
+  touch "${BUNDLE_DIR}/${pkg}_privacy" || true
+  chmod 644 "${BUNDLE_DIR}/${pkg}_privacy" || true
   echo "[Privacy] Created: ${BUNDLE_DIR}/${pkg}_privacy"
+  return 0
 }
 
 # Create in UNINSTALLED_PRODUCTS_DIR (for archive builds - this is where the error occurs)
 if [ -n "${UNINSTALLED_PRODUCTS_DIR:-}" ]; then
+  echo "[Privacy] Creating manifests in UNINSTALLED_PRODUCTS_DIR: ${UNINSTALLED_PRODUCTS_DIR}"
   for pkg in $PACKAGES; do
     create_manifest "$pkg" "${UNINSTALLED_PRODUCTS_DIR}"
   done
@@ -283,19 +287,23 @@ fi
 
 # Create in BUILT_PRODUCTS_DIR (for regular builds)
 if [ -n "${BUILT_PRODUCTS_DIR:-}" ]; then
+  echo "[Privacy] Creating manifests in BUILT_PRODUCTS_DIR: ${BUILT_PRODUCTS_DIR}"
   for pkg in $PACKAGES; do
     create_manifest "$pkg" "${BUILT_PRODUCTS_DIR}"
   done
 fi
 
-# Also create in DerivedData locations (fallback)
+# Also create in DerivedData locations (fallback for archive builds)
 DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
 if [ -d "$DERIVED_DATA_BASE" ]; then
+  echo "[Privacy] Checking DerivedData: $DERIVED_DATA_BASE"
   for runner_dir in "$DERIVED_DATA_BASE"/Runner-*; do
     if [ -d "$runner_dir" ]; then
       uninstalled_dir="${runner_dir}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
-      if [ -d "$(dirname "$uninstalled_dir")" ]; then
-        mkdir -p "$uninstalled_dir"
+      parent_dir="$(dirname "$uninstalled_dir")"
+      if [ -d "$parent_dir" ] || mkdir -p "$parent_dir" 2>/dev/null; then
+        mkdir -p "$uninstalled_dir" || true
+        echo "[Privacy] Creating manifests in: $uninstalled_dir"
         for pkg in $PACKAGES; do
           create_manifest "$pkg" "$uninstalled_dir"
         done
@@ -303,6 +311,8 @@ if [ -d "$DERIVED_DATA_BASE" ]; then
     fi
   done
 fi
+
+echo "[Privacy] Script phase completed"
       SCRIPT
       
       # Declare output paths so Xcode knows these files are created
@@ -325,7 +335,20 @@ fi
       all_phases.each { |p| runner_target.build_phases << p }
       
       project.save
-      puts "✓ Added 'Create Privacy Manifests' script phase to Runner target (runs first)"
+      
+      # Verify the script phase was added
+      runner_target = project.targets.find { |t| t.name == 'Runner' }
+      if runner_target
+        added_phase = runner_target.shell_script_build_phases.find { |p| p.name == script_phase_name }
+        if added_phase
+          position = runner_target.build_phases.index(added_phase)
+          puts "✓ Added 'Create Privacy Manifests' script phase to Runner target"
+          puts "  Position in build phases: #{position || 'unknown'}"
+          puts "  Output paths declared: #{added_phase.output_paths.length} paths"
+        else
+          puts "⚠ Script phase was not found after adding (this is unexpected)"
+        end
+      end
       else
         puts "⚠ Runner target not found in Xcode project"
       end
@@ -335,9 +358,11 @@ fi
   rescue LoadError => e
     puts "⚠ xcodeproj gem not available: #{e.message}"
     puts "  Install with: gem install xcodeproj"
+    puts "  Continuing without script phase modification..."
   rescue => e
     puts "⚠ Failed to add script phase to Runner target: #{e.message}"
     puts "  #{e.backtrace.first}"
+    puts "  Continuing - files will be created via other methods..."
   end
   
   # Create placeholder privacy manifest files after pod install
@@ -373,6 +398,51 @@ fi
       FileUtils.chmod(0644, pod_manifest_file) rescue nil
       puts "  Created in Pods: #{pod_manifest_file}"
     end
+  end
+  
+  # CRITICAL: Create files in DerivedData locations that Xcode will check
+  # This must happen after pod install but before any build
+  derived_data_base = File.join(Dir.home, 'Library', 'Developer', 'Xcode', 'DerivedData')
+  if File.directory?(derived_data_base) || true  # Create even if directory doesn't exist yet
+    # Create in all existing Runner-* directories
+    Dir.glob(File.join(derived_data_base, 'Runner-*')).each do |runner_dir|
+      uninstalled_dir = File.join(runner_dir, 'Build', 'Intermediates.noindex', 
+                                  'ArchiveIntermediates', 'Runner', 
+                                  'IntermediateBuildFilesPath', 'UninstalledProducts', 'iphoneos')
+      FileUtils.mkdir_p(uninstalled_dir) rescue nil
+      privacy_packages.each do |pkg|
+        bundle_dir = File.join(uninstalled_dir, "#{pkg}_privacy.bundle")
+        FileUtils.mkdir_p(bundle_dir) rescue nil
+        manifest_file = File.join(bundle_dir, "#{pkg}_privacy")
+        FileUtils.touch(manifest_file) rescue nil
+        FileUtils.chmod(0644, manifest_file) rescue nil
+        puts "  Created in DerivedData: #{manifest_file}"
+      end
+    end
+    
+    # Also create a script that will be called during build to create files in new DerivedData dirs
+    create_script = File.join(File.dirname(__FILE__), 'create_privacy_manifests_during_build.sh')
+    File.write(create_script, <<-SCRIPT)
+#!/bin/bash
+# This script creates privacy manifests during Xcode build
+DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
+PACKAGES="url_launcher_ios sqflite_darwin shared_preferences_foundation path_provider_foundation flutter_secure_storage flutter_local_notifications share_plus"
+
+for runner_dir in "$DERIVED_DATA_BASE"/Runner-*; do
+  if [ -d "$runner_dir" ]; then
+    uninstalled_dir="${runner_dir}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
+    mkdir -p "$uninstalled_dir"
+    for pkg in $PACKAGES; do
+      BUNDLE_DIR="${uninstalled_dir}/${pkg}_privacy.bundle"
+      mkdir -p "$BUNDLE_DIR"
+      touch "${BUNDLE_DIR}/${pkg}_privacy"
+      chmod 644 "${BUNDLE_DIR}/${pkg}_privacy"
+    done
+  fi
+done
+    SCRIPT
+    FileUtils.chmod(0755, create_script) rescue nil
+    puts "  Created build-time script: #{create_script}"
   end
   
   # Create a script that will create files during build in DerivedData

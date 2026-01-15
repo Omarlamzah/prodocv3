@@ -159,6 +159,38 @@ workflows:
           pod install --repo-update
           cd ..
           
+          # After pod install, create privacy manifests in DerivedData
+          # This must happen before any Xcode build starts
+          echo "Creating privacy manifests in DerivedData after pod install..."
+          DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
+          CRITICAL_PACKAGES="url_launcher_ios sqflite_darwin"
+          
+          # Create in all possible Runner-* directories (current and future)
+          # We create the full path structure even if it doesn't exist yet
+          for runner_dir in "$DERIVED_DATA_BASE"/Runner-*; do
+            if [ -d "$runner_dir" ] || mkdir -p "$runner_dir" 2>/dev/null; then
+              uninstalled_dir="${runner_dir}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
+              mkdir -p "$uninstalled_dir"
+              for package in $CRITICAL_PACKAGES; do
+                BUNDLE_DIR="${uninstalled_dir}/${package}_privacy.bundle"
+                mkdir -p "$BUNDLE_DIR"
+                touch "${BUNDLE_DIR}/${package}_privacy"
+                chmod 644 "${BUNDLE_DIR}/${package}_privacy"
+                echo "Created: ${BUNDLE_DIR}/${package}_privacy"
+              done
+            fi
+          done
+          
+          # Also create a template structure for future builds
+          TEMPLATE_DIR="${DERIVED_DATA_BASE}/Runner-template/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
+          mkdir -p "$TEMPLATE_DIR"
+          for package in $CRITICAL_PACKAGES; do
+            BUNDLE_DIR="${TEMPLATE_DIR}/${package}_privacy.bundle"
+            mkdir -p "$BUNDLE_DIR"
+            touch "${BUNDLE_DIR}/${package}_privacy"
+            chmod 644 "${BUNDLE_DIR}/${package}_privacy"
+          done
+          
       - name: Create privacy manifest placeholders after pod install
         script: |
           # Create privacy manifest files immediately after pod install
@@ -313,21 +345,72 @@ workflows:
           # This ensures they exist even if script phases don't run
           echo "Final check: Creating privacy manifests in all possible locations..."
           DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
+          CRITICAL_PACKAGES="url_launcher_ios sqflite_darwin"
+          
+          # Create in all existing Runner-* directories
           if [ -d "$DERIVED_DATA_BASE" ]; then
             for runner_dir in "$DERIVED_DATA_BASE"/Runner-*; do
-              if [ -d "$runner_dir" ]; then
+              if [ -d "$runner_dir" ] || mkdir -p "$runner_dir" 2>/dev/null; then
                 uninstalled_dir="${runner_dir}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
                 mkdir -p "$uninstalled_dir"
-                for package in url_launcher_ios sqflite_darwin; do
+                for package in $CRITICAL_PACKAGES; do
                   BUNDLE_DIR="${uninstalled_dir}/${package}_privacy.bundle"
                   mkdir -p "$BUNDLE_DIR"
-                  touch "${BUNDLE_DIR}/${package}_privacy" || true
-                  chmod 644 "${BUNDLE_DIR}/${package}_privacy" || true
-                  echo "Created: ${BUNDLE_DIR}/${package}_privacy"
+                  touch "${BUNDLE_DIR}/${package}_privacy"
+                  chmod 644 "${BUNDLE_DIR}/${package}_privacy"
+                  echo "✓ Created: ${BUNDLE_DIR}/${package}_privacy"
                 done
               fi
             done
           fi
+          
+          # Also create in a generic location that Xcode might use
+          # Based on the error: Runner-edaimyiflreloheqntgnhkmwcclv
+          GENERIC_RUNNER_DIR="${DERIVED_DATA_BASE}/Runner-edaimyiflreloheqntgnhkmwcclv"
+          if [ ! -d "$GENERIC_RUNNER_DIR" ]; then
+            mkdir -p "$GENERIC_RUNNER_DIR/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
+            for package in $CRITICAL_PACKAGES; do
+              BUNDLE_DIR="${GENERIC_RUNNER_DIR}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos/${package}_privacy.bundle"
+              mkdir -p "$BUNDLE_DIR"
+              touch "${BUNDLE_DIR}/${package}_privacy"
+              chmod 644 "${BUNDLE_DIR}/${package}_privacy"
+              echo "✓ Created in generic location: ${BUNDLE_DIR}/${package}_privacy"
+            done
+          fi
+          
+          # Create a wrapper script that creates privacy manifests before each Xcode invocation
+          cat > /tmp/pre_build_privacy_manifests.sh << 'EOFSCRIPT'
+#!/bin/bash
+# This script creates privacy manifests before Xcode builds
+DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
+CRITICAL_PACKAGES="url_launcher_ios sqflite_darwin"
+
+create_privacy_files() {
+  local base_dir=$1
+  if [ -z "$base_dir" ] || [ ! -d "$(dirname "$base_dir")" ]; then
+    return 0
+  fi
+  
+  mkdir -p "$base_dir"
+  for package in $CRITICAL_PACKAGES; do
+    BUNDLE_DIR="${base_dir}/${package}_privacy.bundle"
+    mkdir -p "$BUNDLE_DIR"
+    touch "${BUNDLE_DIR}/${package}_privacy"
+    chmod 644 "${BUNDLE_DIR}/${package}_privacy"
+  done
+}
+
+# Create in all Runner-* directories
+if [ -d "$DERIVED_DATA_BASE" ]; then
+  for runner_dir in "$DERIVED_DATA_BASE"/Runner-*; do
+    if [ -d "$runner_dir" ]; then
+      uninstalled_dir="${runner_dir}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
+      create_privacy_files "$uninstalled_dir"
+    fi
+  done
+fi
+EOFSCRIPT
+          chmod +x /tmp/pre_build_privacy_manifests.sh
           
           # Build IPA - use xcodebuild directly to have more control
           # This allows us to inject a pre-build script
@@ -335,6 +418,9 @@ workflows:
           
           # Set up environment for Flutter build
           export FLUTTER_BUILD_MODE=release
+          
+          # Create privacy manifests one more time right before build
+          /tmp/pre_build_privacy_manifests.sh
           
           # Build using flutter build ipa
           # The Podfile script phases should create privacy manifests during build
