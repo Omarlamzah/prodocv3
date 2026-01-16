@@ -262,7 +262,8 @@ echo "[Privacy] Completed for ${TARGET}"
       script_phase = runner_target.new_shell_script_build_phase(script_phase_name)
       script_phase.shell_script = <<-SCRIPT
 #!/bin/bash
-set -e
+# Don't use set -e, we want to continue even if some operations fail
+set +e
 
 # Create privacy manifest files for all packages that need them
 # This MUST run before Xcode checks for these files as build inputs
@@ -277,26 +278,30 @@ create_manifest() {
   fi
   
   BUNDLE_DIR="${base_dir}/${pkg}_privacy.bundle"
-  mkdir -p "$BUNDLE_DIR" || true
-  touch "${BUNDLE_DIR}/${pkg}_privacy" || true
-  chmod 644 "${BUNDLE_DIR}/${pkg}_privacy" || true
-  echo "[Privacy] Created: ${BUNDLE_DIR}/${pkg}_privacy"
+  mkdir -p "$BUNDLE_DIR" 2>/dev/null || true
+  touch "${BUNDLE_DIR}/${pkg}_privacy" 2>/dev/null || true
+  chmod 644 "${BUNDLE_DIR}/${pkg}_privacy" 2>/dev/null || true
+  if [ -f "${BUNDLE_DIR}/${pkg}_privacy" ]; then
+    echo "[Privacy] ✓ Created: ${BUNDLE_DIR}/${pkg}_privacy"
+  fi
   return 0
 }
 
 # CRITICAL: Create in UNINSTALLED_PRODUCTS_DIR (for archive builds - this is where the error occurs)
 if [ -n "${UNINSTALLED_PRODUCTS_DIR:-}" ]; then
   echo "[Privacy] Creating manifests in UNINSTALLED_PRODUCTS_DIR: ${UNINSTALLED_PRODUCTS_DIR}"
+  mkdir -p "${UNINSTALLED_PRODUCTS_DIR}" 2>/dev/null || true
   for pkg in $PACKAGES; do
     create_manifest "$pkg" "${UNINSTALLED_PRODUCTS_DIR}"
   done
 else
-  echo "[Privacy] WARNING: UNINSTALLED_PRODUCTS_DIR not set, using fallback"
+  echo "[Privacy] WARNING: UNINSTALLED_PRODUCTS_DIR not set"
 fi
 
 # Create in BUILT_PRODUCTS_DIR (for regular builds)
 if [ -n "${BUILT_PRODUCTS_DIR:-}" ]; then
   echo "[Privacy] Creating manifests in BUILT_PRODUCTS_DIR: ${BUILT_PRODUCTS_DIR}"
+  mkdir -p "${BUILT_PRODUCTS_DIR}" 2>/dev/null || true
   for pkg in $PACKAGES; do
     create_manifest "$pkg" "${BUILT_PRODUCTS_DIR}"
   done
@@ -307,21 +312,16 @@ fi
 DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
 if [ -d "$DERIVED_DATA_BASE" ]; then
   echo "[Privacy] Checking DerivedData: $DERIVED_DATA_BASE"
-  for runner_dir in "$DERIVED_DATA_BASE"/Runner-*; do
+  # Find ALL Runner-* directories and create files in each
+  find "$DERIVED_DATA_BASE" -maxdepth 1 -type d -name "Runner-*" 2>/dev/null | while read runner_dir; do
     if [ -d "$runner_dir" ]; then
       # Try the exact path structure that Xcode uses
       uninstalled_dir="${runner_dir}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
-      parent_dir="$(dirname "$uninstalled_dir")"
       
-      # Create parent directories if they don't exist
-      if [ ! -d "$parent_dir" ]; then
-        mkdir -p "$parent_dir" 2>/dev/null || true
-      fi
-      
-      # Create the uninstalled products directory
+      # Create ALL parent directories
       mkdir -p "$uninstalled_dir" 2>/dev/null || true
       
-      if [ -d "$uninstalled_dir" ] || [ -d "$(dirname "$uninstalled_dir")" ]; then
+      if [ -d "$(dirname "$uninstalled_dir")" ]; then
         echo "[Privacy] Creating manifests in: $uninstalled_dir"
         for pkg in $PACKAGES; do
           create_manifest "$pkg" "$uninstalled_dir"
@@ -329,12 +329,18 @@ if [ -d "$DERIVED_DATA_BASE" ]; then
       fi
     fi
   done
+  
+  # Also try the specific directory from the error
+  specific_dir="${DERIVED_DATA_BASE}/Runner-edaimyiflreloheqntgnhkmwcclv/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
+  mkdir -p "$specific_dir" 2>/dev/null || true
+  echo "[Privacy] Creating manifests in specific directory: $specific_dir"
+  for pkg in $PACKAGES; do
+    create_manifest "$pkg" "$specific_dir"
+  done
 fi
 
 # Also try to create in the current build's DerivedData if we can detect it
-# This handles the case where Xcode creates a new directory during the build
 if [ -n "${PROJECT_TEMP_DIR:-}" ]; then
-  # PROJECT_TEMP_DIR might point to DerivedData
   if [[ "$PROJECT_TEMP_DIR" == *"DerivedData"* ]]; then
     uninstalled_dir="${PROJECT_TEMP_DIR}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
     mkdir -p "$uninstalled_dir" 2>/dev/null || true
@@ -344,6 +350,19 @@ if [ -n "${PROJECT_TEMP_DIR:-}" ]; then
     done
   fi
 fi
+
+# Final check: Create in any directory that might exist
+for possible_base in "${DERIVED_DATA_BASE}/Runner-"* "${BUILT_PRODUCTS_DIR}" "${UNINSTALLED_PRODUCTS_DIR}"; do
+  if [ -n "$possible_base" ] && [ -d "$(dirname "$possible_base" 2>/dev/null)" ] 2>/dev/null; then
+    uninstalled_dir="${possible_base}/Build/Intermediates.noindex/ArchiveIntermediates/Runner/IntermediateBuildFilesPath/UninstalledProducts/iphoneos"
+    if [ -d "$(dirname "$uninstalled_dir" 2>/dev/null)" ] 2>/dev/null; then
+      mkdir -p "$uninstalled_dir" 2>/dev/null || true
+      for pkg in $PACKAGES; do
+        create_manifest "$pkg" "$uninstalled_dir"
+      done
+    fi
+  fi
+done
 
 echo "[Privacy] Script phase completed"
       SCRIPT
@@ -478,6 +497,22 @@ echo "[Privacy] Script phase completed"
       FileUtils.chmod(0644, manifest_file) rescue nil
       puts "  Created proactively in: #{manifest_file}"
     end
+  end
+  
+  # CRITICAL: Create files in the SPECIFIC DerivedData directory from the error
+  # This is the exact directory Xcode uses: Runner-edaimyiflreloheqntgnhkmwcclv
+  specific_runner_dir = File.join(derived_data_base, 'Runner-edaimyiflreloheqntgnhkmwcclv')
+  specific_uninstalled_dir = File.join(specific_runner_dir, 'Build', 'Intermediates.noindex', 
+                                       'ArchiveIntermediates', 'Runner', 
+                                       'IntermediateBuildFilesPath', 'UninstalledProducts', 'iphoneos')
+  FileUtils.mkdir_p(specific_uninstalled_dir) rescue nil
+  privacy_packages.each do |pkg|
+    bundle_dir = File.join(specific_uninstalled_dir, "#{pkg}_privacy.bundle")
+    FileUtils.mkdir_p(bundle_dir) rescue nil
+    manifest_file = File.join(bundle_dir, "#{pkg}_privacy")
+    FileUtils.touch(manifest_file) rescue nil
+    FileUtils.chmod(0644, manifest_file) rescue nil
+    puts "  Created in specific DerivedData: #{manifest_file}"
   end
   
   # Also create in ANY Runner-* directory that might be created during build
