@@ -44,27 +44,14 @@ workflows:
         - ios/Flutter/Flutter.podspec
 
     scripts:
-      - name: Set up code signing
+      # Code signing is handled automatically by Codemagic using the app_store_connect integration
+      # The integration 'prodoc_api_key_admin' is configured in Codemagic UI
+      # Codemagic will automatically fetch certificates and profiles - no manual setup needed!
+      
+      - name: Create privacy manifests before build
         script: |
-          # IMPORTANT: Since automatic code signing via API key isn't working,
-          # we need to use manual code signing via Codemagic UI
-          # 
-          # TO FIX CODE SIGNING:
-          # 1. Get the .p12 certificate file from someone with a Mac
-          # 2. Go to Codemagic UI → Your App → Settings → Code signing
-          # 3. Upload: .p12 certificate + .mobileprovision profile
-          #
-          # For now, we'll try to work with what Codemagic provides automatically
-          echo "=========================================="
-          echo "Code Signing Setup (API Key Method)"
-          echo "=========================================="
-          echo "Team ID: JT4YJSSV45"
-          echo "Bundle ID: com.nextpital.prodoc"
-          echo "API Key Integration: prodoc_api_key_admin"
-          echo "API Key ID: 2SXY3XRQDL (Admin access)"
-          echo ""
-          
-          # Check if API key environment variables are available (from Codemagic integration)
+          echo "Creating privacy manifest files before build..."
+          bash ios/create_privacy_manifests_pre_build.sh
           echo "Checking API key configuration..."
           API_KEY_ID=""
           ISSUER_ID=""

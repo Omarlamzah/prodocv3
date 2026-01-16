@@ -439,10 +439,9 @@ echo "[Privacy] Script phase completed"
     FileUtils.chmod(0644, manifest_file) rescue nil
     puts "  Created in template: #{manifest_file}"
   end
-    
-    # Also create a script that will be called during build to create files in new DerivedData dirs
-    create_script = File.join(File.dirname(__FILE__), 'create_privacy_manifests_during_build.sh')
-    File.write(create_script, <<-SCRIPT)
+  # Also create a script that will be called during build to create files in new DerivedData dirs
+  create_script = File.join(File.dirname(__FILE__), 'create_privacy_manifests_during_build.sh')
+  File.write(create_script, <<-SCRIPT)
 #!/bin/bash
 # This script creates privacy manifests during Xcode build
 DERIVED_DATA_BASE="$HOME/Library/Developer/Xcode/DerivedData"
@@ -460,10 +459,9 @@ for runner_dir in "$DERIVED_DATA_BASE"/Runner-*; do
     done
   fi
 done
-    SCRIPT
-    FileUtils.chmod(0755, create_script) rescue nil
-    puts "  Created build-time script: #{create_script}"
-  end
+  SCRIPT
+  FileUtils.chmod(0755, create_script) rescue nil
+  puts "  Created build-time script: #{create_script}"
   
   # Create a script that will create files during build in DerivedData
   # This script will be called by the script phases
