@@ -11,16 +11,24 @@ workflows:
       # CodeMagic will automatically use it for code signing
     
     # Integrations - required for App Store Connect publishing and code signing
-    # NEW API KEY (with Admin access and Certificate Management):
-    # - Key ID: 2R56FU2DCS
+    # NEW API KEY (with Admin access):
+    # - Name: prodoc_api_key_admin
+    # - Key ID: 2SXY3XRQDL
     # - Issuer ID: 24e51026-b46d-49ab-89ba-d7791751dfd5
     # - Access: Admin ✅
-    # - Private Key: AuthKey_2R56FU2DCS.p8
+    # - Private Key: AuthKey_2SXY3XRQDL.p8 (will be used from repository)
     #
-    # IMPORTANT: Upload the .p8 file to Codemagic UI → Integrations → App Store Connect
-    #            Name the integration: "prodoc_api_key_admin" (or update the name below)
+    # OPTION 1: Use integration (if configured in Codemagic UI)
+    # OPTION 2: Use environment variables (set in Codemagic UI → Environment variables)
+    # OPTION 3: Use files from repository (configured below)
     integrations:
-      app_store_connect: prodoc_api_key_admin  # NEW API key with Admin access (Key: 2R56FU2DCS)
+      app_store_connect: prodoc_api_key_admin  # API key with Admin access (Key ID: 2SXY3XRQDL)
+    
+    # Environment variables (set these in Codemagic UI → Environment variables as backup)
+    # If integration doesn't work, these will be used:
+    # - APP_STORE_CONNECT_API_KEY_ID = 2SXY3XRQDL
+    # - APP_STORE_CONNECT_ISSUER_ID = 24e51026-b46d-49ab-89ba-d7791751dfd5
+    # - APP_STORE_CONNECT_API_KEY = (content of AuthKey_2SXY3XRQDL.p8 file)
         
     # Cache configuration
     cache:
@@ -53,30 +61,69 @@ workflows:
           echo "Team ID: JT4YJSSV45"
           echo "Bundle ID: com.nextpital.prodoc"
           echo "API Key Integration: prodoc_api_key_admin"
-          echo "API Key ID: 2R56FU2DCS (NEW - Admin access)"
+          echo "API Key ID: 2SXY3XRQDL (Admin access)"
           echo ""
           
-          # Check if API key environment variables are available
+          # Check if API key environment variables are available (from Codemagic integration)
           echo "Checking API key configuration..."
+          API_KEY_ID=""
+          ISSUER_ID=""
+          API_KEY_CONTENT=""
+          
           if [ -n "$APP_STORE_CONNECT_API_KEY_ID" ]; then
-            echo "✓ APP_STORE_CONNECT_API_KEY_ID: $APP_STORE_CONNECT_API_KEY_ID"
+            API_KEY_ID="$APP_STORE_CONNECT_API_KEY_ID"
+            echo "✓ APP_STORE_CONNECT_API_KEY_ID: $API_KEY_ID (from integration)"
           else
-            echo "⚠ APP_STORE_CONNECT_API_KEY_ID not set"
+            echo "⚠ APP_STORE_CONNECT_API_KEY_ID not set in integration"
           fi
           
           if [ -n "$APP_STORE_CONNECT_ISSUER_ID" ]; then
-            echo "✓ APP_STORE_CONNECT_ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID"
+            ISSUER_ID="$APP_STORE_CONNECT_ISSUER_ID"
+            echo "✓ APP_STORE_CONNECT_ISSUER_ID: $ISSUER_ID (from integration)"
           else
-            echo "⚠ APP_STORE_CONNECT_ISSUER_ID not set"
+            echo "⚠ APP_STORE_CONNECT_ISSUER_ID not set in integration"
           fi
           
           if [ -n "$APP_STORE_CONNECT_API_KEY" ]; then
-            echo "✓ APP_STORE_CONNECT_API_KEY is set (private key)"
+            API_KEY_CONTENT="$APP_STORE_CONNECT_API_KEY"
+            echo "✓ APP_STORE_CONNECT_API_KEY is set (from integration)"
           else
-            echo "⚠ APP_STORE_CONNECT_API_KEY not set (private key missing)"
-            echo "  This means the .p8 private key file is not uploaded to Codemagic"
-            echo "  Go to: Codemagic UI → Integrations → App Store Connect"
-            echo "  Upload the .p8 private key file"
+            echo "⚠ APP_STORE_CONNECT_API_KEY not set in integration"
+          fi
+          
+          # FALLBACK: Try to use .p8 file from repository
+          if [ -z "$API_KEY_CONTENT" ] && [ -f "AuthKey_2SXY3XRQDL.p8" ]; then
+            echo ""
+            echo "Using .p8 file from repository as fallback..."
+            API_KEY_CONTENT=$(cat AuthKey_2SXY3XRQDL.p8)
+            API_KEY_ID="2SXY3XRQDL"
+            ISSUER_ID="24e51026-b46d-49ab-89ba-d7791751dfd5"
+            echo "✓ Loaded API key from repository file"
+            echo "  Key ID: $API_KEY_ID"
+            echo "  Issuer ID: $ISSUER_ID"
+            
+            # Set environment variables for app-store-connect commands
+            export APP_STORE_CONNECT_API_KEY_ID="$API_KEY_ID"
+            export APP_STORE_CONNECT_ISSUER_ID="$ISSUER_ID"
+            export APP_STORE_CONNECT_API_KEY="$API_KEY_CONTENT"
+            
+            # Also save to file for app-store-connect CLI
+            echo "$API_KEY_CONTENT" > /tmp/AuthKey.p8
+            export APP_STORE_CONNECT_API_KEY_PATH="/tmp/AuthKey.p8"
+            echo "✓ Saved API key to /tmp/AuthKey.p8 for CLI use"
+          fi
+          
+          # Final check
+          if [ -z "$API_KEY_ID" ] || [ -z "$ISSUER_ID" ] || [ -z "$API_KEY_CONTENT" ]; then
+            echo ""
+            echo "⚠ WARNING: API key not fully configured!"
+            echo "  Either:"
+            echo "  1. Configure integration in Codemagic UI, OR"
+            echo "  2. Set environment variables in Codemagic UI, OR"
+            echo "  3. Ensure AuthKey_2SXY3XRQDL.p8 is in repository"
+          else
+            echo ""
+            echo "✓ API key is configured and ready to use"
           fi
           echo ""
           
@@ -124,6 +171,46 @@ workflows:
                 security import "$cert_file" -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign 2>&1 || true
               fi
             done
+          fi
+          
+          # CRITICAL: Copy provisioning profile from repo to system location
+          # This ensures the profile is available even if API key fetch fails
+          echo ""
+          echo "Setting up provisioning profile from repository..."
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          
+          # Try to find the provisioning profile file (it might be in root or ios directory)
+          PROFILE_FILE=""
+          if [ -f "Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision" ]; then
+            PROFILE_FILE="Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision"
+          elif [ -f "../Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision" ]; then
+            PROFILE_FILE="../Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision"
+          fi
+          
+          if [ -n "$PROFILE_FILE" ] && [ -f "$PROFILE_FILE" ]; then
+            echo "Found provisioning profile: $PROFILE_FILE"
+            # Extract UUID from the profile
+            PROFILE_UUID=$(security cms -D -i "$PROFILE_FILE" 2>/dev/null | grep -A1 "<key>UUID</key>" | tail -1 | sed 's/.*<string>\(.*\)<\/string>.*/\1/' | tr -d ' ' || echo "")
+            
+            if [ -z "$PROFILE_UUID" ]; then
+              # Fallback: use UUID from the profile content we saw earlier
+              PROFILE_UUID="03ce1337-38eb-4b45-946f-4ddbe9343e88"
+            fi
+            
+            TARGET_PROFILE=~/Library/MobileDevice/Provisioning\ Profiles/${PROFILE_UUID}.mobileprovision
+            cp "$PROFILE_FILE" "$TARGET_PROFILE"
+            echo "✓ Copied provisioning profile to: $TARGET_PROFILE"
+            echo "  UUID: $PROFILE_UUID"
+            
+            # Verify it was copied
+            if [ -f "$TARGET_PROFILE" ]; then
+              echo "✓ Provisioning profile is now in system location"
+            else
+              echo "⚠ Failed to copy provisioning profile"
+            fi
+          else
+            echo "⚠ Provisioning profile file not found in repository"
+            echo "  Expected: Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision"
           fi
           
           # Check what we have
