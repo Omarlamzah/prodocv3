@@ -483,6 +483,24 @@ echo "[Privacy] Script phase completed"
   # Ensure DerivedData base directory exists
   FileUtils.mkdir_p(derived_data_base) rescue nil
   
+  # CRITICAL: Create files in the SPECIFIC DerivedData directory from the error
+  # This is the exact directory Xcode uses: Runner-edaimyiflreloheqntgnhkmwcclv
+  specific_runner_dir = File.join(derived_data_base, 'Runner-edaimyiflreloheqntgnhkmwcclv')
+  specific_uninstalled_dir = File.join(specific_runner_dir, 'Build', 'Intermediates.noindex', 
+                                       'ArchiveIntermediates', 'Runner', 
+                                       'IntermediateBuildFilesPath', 'UninstalledProducts', 'iphoneos')
+  # Create ALL parent directories
+  FileUtils.mkdir_p(File.dirname(specific_uninstalled_dir)) rescue nil
+  FileUtils.mkdir_p(specific_uninstalled_dir) rescue nil
+  privacy_packages.each do |pkg|
+    bundle_dir = File.join(specific_uninstalled_dir, "#{pkg}_privacy.bundle")
+    FileUtils.mkdir_p(bundle_dir) rescue nil
+    manifest_file = File.join(bundle_dir, "#{pkg}_privacy")
+    FileUtils.touch(manifest_file) rescue nil
+    FileUtils.chmod(0644, manifest_file) rescue nil
+    puts "  ✓ Created in specific DerivedData: #{manifest_file}"
+  end
+  
   # Create in all existing Runner-* directories
   Dir.glob(File.join(derived_data_base, 'Runner-*')).each do |runner_dir|
     uninstalled_dir = File.join(runner_dir, 'Build', 'Intermediates.noindex', 
@@ -504,8 +522,8 @@ echo "[Privacy] Script phase completed"
   # CRITICAL: Also create files proactively in potential future DerivedData directories
   # Xcode creates new DerivedData directories with unique hashes during build
   # We'll create files in a pattern that matches what Xcode will create
-  # Try to create in multiple potential locations, including the specific one from the error
-  ['Runner-edaimyiflreloheqntgnhkmwcclv', 'Runner-template'].each do |runner_name|
+  # Try to create in multiple potential locations
+  ['Runner-template'].each do |runner_name|
     potential_dir = File.join(derived_data_base, runner_name, 'Build', 'Intermediates.noindex', 
                               'ArchiveIntermediates', 'Runner', 
                               'IntermediateBuildFilesPath', 'UninstalledProducts', 'iphoneos')
@@ -520,22 +538,6 @@ echo "[Privacy] Script phase completed"
       FileUtils.chmod(0644, manifest_file) rescue nil
       puts "  Created proactively in: #{manifest_file}"
     end
-  end
-  
-  # CRITICAL: Create files in the SPECIFIC DerivedData directory from the error
-  # This is the exact directory Xcode uses: Runner-edaimyiflreloheqntgnhkmwcclv
-  specific_runner_dir = File.join(derived_data_base, 'Runner-edaimyiflreloheqntgnhkmwcclv')
-  specific_uninstalled_dir = File.join(specific_runner_dir, 'Build', 'Intermediates.noindex', 
-                                       'ArchiveIntermediates', 'Runner', 
-                                       'IntermediateBuildFilesPath', 'UninstalledProducts', 'iphoneos')
-  FileUtils.mkdir_p(specific_uninstalled_dir) rescue nil
-  privacy_packages.each do |pkg|
-    bundle_dir = File.join(specific_uninstalled_dir, "#{pkg}_privacy.bundle")
-    FileUtils.mkdir_p(bundle_dir) rescue nil
-    manifest_file = File.join(bundle_dir, "#{pkg}_privacy")
-    FileUtils.touch(manifest_file) rescue nil
-    FileUtils.chmod(0644, manifest_file) rescue nil
-    puts "  Created in specific DerivedData: #{manifest_file}"
   end
   
   # Also create in ANY Runner-* directory that might be created during build
