@@ -131,26 +131,53 @@ workflows:
           echo "Initializing keychain..."
           keychain initialize
           
-          # Try to fetch signing files (may not work if API key doesn't have permissions)
+          # Try to fetch signing files using API key
           echo "Attempting to fetch signing files from App Store Connect..."
-          echo "This should work since your certificate was created by API key..."
           
-          # Try multiple times with different approaches
-          app-store-connect fetch-signing-files com.nextpital.prodoc \
-            --type IOS_APP_STORE \
-            --create \
-            --platform IOS 2>&1 | tee /tmp/fetch_signing.log || {
-            echo "⚠ First attempt failed, trying alternative method..."
+          # Use API key from environment or repository file
+          if [ -n "$APP_STORE_CONNECT_API_KEY_PATH" ] && [ -f "$APP_STORE_CONNECT_API_KEY_PATH" ]; then
+            echo "Using API key from file: $APP_STORE_CONNECT_API_KEY_PATH"
+            export APP_STORE_CONNECT_API_KEY_PATH="$APP_STORE_CONNECT_API_KEY_PATH"
+          elif [ -f "AuthKey_2SXY3XRQDL.p8" ]; then
+            echo "Using API key from repository: AuthKey_2SXY3XRQDL.p8"
+            export APP_STORE_CONNECT_API_KEY_PATH="$(pwd)/AuthKey_2SXY3XRQDL.p8"
+          fi
+          
+          # Try to fetch signing files using API key
+          # The app-store-connect CLI will use environment variables automatically
+          if [ -n "$APP_STORE_CONNECT_API_KEY_ID" ] && [ -n "$APP_STORE_CONNECT_ISSUER_ID" ]; then
+            echo "API key environment variables are set, fetching signing files..."
+            echo "  Key ID: $APP_STORE_CONNECT_API_KEY_ID"
+            echo "  Issuer ID: $APP_STORE_CONNECT_ISSUER_ID"
             
-            # Try without --create flag (in case profile already exists)
+            # Try to fetch signing files
             app-store-connect fetch-signing-files com.nextpital.prodoc \
               --type IOS_APP_STORE \
-              --platform IOS 2>&1 | tee -a /tmp/fetch_signing.log || {
-              echo "⚠ Alternative method also failed"
-              echo "Checking log for details:"
+              --create \
+              --platform IOS 2>&1 | tee /tmp/fetch_signing.log || {
+              echo "⚠ First attempt failed, trying without --create flag..."
+              
+              app-store-connect fetch-signing-files com.nextpital.prodoc \
+                --type IOS_APP_STORE \
+                --platform IOS 2>&1 | tee -a /tmp/fetch_signing.log || {
+                echo "⚠ Fetch failed, checking log:"
+                tail -30 /tmp/fetch_signing.log || true
+              }
+            }
+          else
+            echo "⚠ API key environment variables not set"
+            echo "  Will try to use Codemagic integration or repository files"
+            echo "  Attempting fetch anyway (may use integration)..."
+            
+            app-store-connect fetch-signing-files com.nextpital.prodoc \
+              --type IOS_APP_STORE \
+              --create \
+              --platform IOS 2>&1 | tee /tmp/fetch_signing.log || {
+              echo "⚠ Fetch failed - API key not configured"
+              echo "  Check log:"
               tail -30 /tmp/fetch_signing.log || true
             }
-          }
+          fi
           
           # Add any certificates that were fetched
           echo ""
@@ -179,38 +206,49 @@ workflows:
           echo "Setting up provisioning profile from repository..."
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           
-          # Try to find the provisioning profile file (it might be in root or ios directory)
+          # Try to find the provisioning profile file (check multiple locations)
           PROFILE_FILE=""
-          if [ -f "Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision" ]; then
-            PROFILE_FILE="Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision"
-          elif [ -f "../Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision" ]; then
-            PROFILE_FILE="../Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision"
-          fi
+          PROFILE_UUID="03ce1337-38eb-4b45-946f-4ddbe9343e88"  # Known UUID from profile
+          
+          # Check in current directory
+          for possible_path in \
+            "Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision" \
+            "./Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision" \
+            "../Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision"; do
+            if [ -f "$possible_path" ]; then
+              PROFILE_FILE="$possible_path"
+              break
+            fi
+          done
           
           if [ -n "$PROFILE_FILE" ] && [ -f "$PROFILE_FILE" ]; then
-            echo "Found provisioning profile: $PROFILE_FILE"
-            # Extract UUID from the profile
-            PROFILE_UUID=$(security cms -D -i "$PROFILE_FILE" 2>/dev/null | grep -A1 "<key>UUID</key>" | tail -1 | sed 's/.*<string>\(.*\)<\/string>.*/\1/' | tr -d ' ' || echo "")
+            echo "✓ Found provisioning profile: $PROFILE_FILE"
             
-            if [ -z "$PROFILE_UUID" ]; then
-              # Fallback: use UUID from the profile content we saw earlier
-              PROFILE_UUID="03ce1337-38eb-4b45-946f-4ddbe9343e88"
+            # Try to extract UUID from the profile
+            EXTRACTED_UUID=$(security cms -D -i "$PROFILE_FILE" 2>/dev/null | grep -A1 "<key>UUID</key>" | tail -1 | sed 's/.*<string>\(.*\)<\/string>.*/\1/' | tr -d ' ' || echo "")
+            if [ -n "$EXTRACTED_UUID" ]; then
+              PROFILE_UUID="$EXTRACTED_UUID"
+              echo "  Extracted UUID: $PROFILE_UUID"
+            else
+              echo "  Using known UUID: $PROFILE_UUID"
             fi
             
+            # Copy to system location with UUID as filename (required by Xcode)
             TARGET_PROFILE=~/Library/MobileDevice/Provisioning\ Profiles/${PROFILE_UUID}.mobileprovision
             cp "$PROFILE_FILE" "$TARGET_PROFILE"
-            echo "✓ Copied provisioning profile to: $TARGET_PROFILE"
-            echo "  UUID: $PROFILE_UUID"
+            chmod 644 "$TARGET_PROFILE"
             
-            # Verify it was copied
             if [ -f "$TARGET_PROFILE" ]; then
-              echo "✓ Provisioning profile is now in system location"
+              echo "✓ Provisioning profile copied to system location"
+              echo "  Path: $TARGET_PROFILE"
+              echo "  UUID: $PROFILE_UUID"
             else
               echo "⚠ Failed to copy provisioning profile"
             fi
           else
             echo "⚠ Provisioning profile file not found in repository"
-            echo "  Expected: Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision"
+            echo "  Searched for: Prodoc_Medical_Management_App_ios_app_store_1767979241.mobileprovision"
+            echo "  Make sure this file is committed to GitHub"
           fi
           
           # Check what we have
