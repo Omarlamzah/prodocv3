@@ -407,25 +407,23 @@ workflows:
           echo ""
           echo "Creating export options for App Store distribution..."
           
-          # Create export options plist for App Store distribution
-          cat > /tmp/export_options.plist << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>method</key>
-    <string>app-store</string>
-    <key>teamID</key>
-    <string>JT4YJSSV45</string>
-    <key>signingStyle</key>
-    <string>automatic</string>
-    <key>uploadBitcode</key>
-    <false/>
-    <key>uploadSymbols</key>
-    <true/>
-</dict>
-</plist>
-EOF
+          # Create export options plist for App Store distribution using echo (YAML-safe)
+          echo '<?xml version="1.0" encoding="UTF-8"?>' > /tmp/export_options.plist
+          echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' >> /tmp/export_options.plist
+          echo '<plist version="1.0">' >> /tmp/export_options.plist
+          echo '<dict>' >> /tmp/export_options.plist
+          echo '    <key>method</key>' >> /tmp/export_options.plist
+          echo '    <string>app-store</string>' >> /tmp/export_options.plist
+          echo '    <key>teamID</key>' >> /tmp/export_options.plist
+          echo '    <string>JT4YJSSV45</string>' >> /tmp/export_options.plist
+          echo '    <key>signingStyle</key>' >> /tmp/export_options.plist
+          echo '    <string>automatic</string>' >> /tmp/export_options.plist
+          echo '    <key>uploadBitcode</key>' >> /tmp/export_options.plist
+          echo '    <false/>' >> /tmp/export_options.plist
+          echo '    <key>uploadSymbols</key>' >> /tmp/export_options.plist
+          echo '    <true/>' >> /tmp/export_options.plist
+          echo '</dict>' >> /tmp/export_options.plist
+          echo '</plist>' >> /tmp/export_options.plist
           
           echo "Export options created:"
           cat /tmp/export_options.plist
