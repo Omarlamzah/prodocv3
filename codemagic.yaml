@@ -11,6 +11,10 @@ workflows:
       # CodeMagic will automatically use it for code signing
     
     # Integrations - required for App Store Connect publishing and code signing
+    # Option 1: Use App Store Connect API key (automatic code signing)
+    # Option 2: Upload certificates manually via Codemagic UI (Settings → Code signing)
+    #           If you upload .p12 certificate and .mobileprovision profile manually,
+    #           Codemagic will use those instead of fetching via API key
     integrations:
       app_store_connect: myappkey_admin_forcodemajic  # References the API key configured in Codemagic UI (Key: 87FW8F4TSV, Access: Admin)
         
@@ -31,148 +35,70 @@ workflows:
       - name: Set up code signing
         script: |
           # Codemagic automatically handles code signing using the App Store Connect API key
-          # This step ensures profiles are created/fetched and the Xcode project is configured correctly
+          # Since you don't have a Mac, we rely on Codemagic's automatic code signing
+          # The certificate was created by API key, so Codemagic should be able to fetch it
           echo "=========================================="
-          echo "Setting up code signing..."
+          echo "Setting up code signing (automatic via API key)..."
           echo "=========================================="
           echo "Team ID: JT4YJSSV45"
           echo "Bundle ID: com.nextpital.prodoc"
           echo "API Key Integration: myappkey_admin_forcodemajic"
           echo ""
-          
-          # Check if API key environment variables are available
-          if [ -z "$APP_STORE_CONNECT_API_KEY_ID" ] && [ -z "$APP_STORE_CONNECT_ISSUER_ID" ]; then
-            echo "⚠ WARNING: App Store Connect API key environment variables not detected"
-            echo "  This might mean the API key integration isn't working"
-            echo "  Check Codemagic UI → Integrations → App Store Connect"
-          else
-            echo "✓ App Store Connect API key environment variables detected"
-            if [ -n "$APP_STORE_CONNECT_API_KEY_ID" ]; then
-              echo "  Key ID: $APP_STORE_CONNECT_API_KEY_ID"
-            fi
-            if [ -n "$APP_STORE_CONNECT_ISSUER_ID" ]; then
-              echo "  Issuer ID: $APP_STORE_CONNECT_ISSUER_ID"
-            fi
-          fi
+          echo "Note: Codemagic will automatically fetch certificates and profiles"
+          echo "      using the App Store Connect API key configured in integrations."
           echo ""
           
-          # Initialize keychain (Codemagic does this automatically, but we ensure it's done)
-          keychain initialize
+          # Codemagic automatically runs these steps before our scripts:
+          # 1. keychain initialize
+          # 2. app-store-connect fetch-signing-files (automatic)
+          # 3. keychain add-certificates (automatic)
+          #
+          # We just need to verify everything is set up correctly
           
-          # Fetch/create signing files using App Store Connect API key
-          # The --create flag will create profiles if they don't exist
-          echo "Fetching/creating signing files from App Store Connect..."
-          echo "This may take a moment..."
-          app-store-connect fetch-signing-files com.nextpital.prodoc \
-            --type IOS_APP_STORE \
-            --create \
-            --platform IOS 2>&1 | tee /tmp/fetch_signing.log || {
-            echo "⚠ Warning: fetch-signing-files had issues"
-            echo "Checking log:"
-            tail -20 /tmp/fetch_signing.log || true
-          }
-          
-          # Add certificates to keychain
-          echo ""
-          echo "Adding certificates to keychain..."
-          keychain add-certificates 2>&1 | tee /tmp/add_certs.log || {
-            echo "⚠ Warning: add-certificates had issues"
-            echo "Checking log:"
-            tail -20 /tmp/add_certs.log || true
-          }
-          
-          # Verify certificates were added
-          echo ""
-          echo "Verifying certificates in keychain..."
-          CERT_COUNT=$(security find-identity -v -p codesigning 2>/dev/null | grep -c "JT4YJSSV45" || echo "0")
-          if [ "$CERT_COUNT" -eq "0" ]; then
-            echo "⚠ WARNING: No certificates found for team JT4YJSSV45"
-            echo "Listing all certificates:"
-            security find-identity -v -p codesigning 2>/dev/null | head -10 || true
-            echo ""
-            echo "Checking certificate files:"
-            ls -la ~/Library/MobileDevice/Certificates/ 2>/dev/null || echo "No certificate files found"
-          else
-            echo "✓ Found $CERT_COUNT certificate(s) for team JT4YJSSV45"
-          fi
-          
-          # Configure Xcode project to use the profiles
-          echo ""
-          echo "Configuring Xcode project..."
-          cd ios
-          xcode-project use-profiles || {
-            echo "Note: Profiles will be used automatically during build"
-          }
-          cd ..
-          
-          # Verify Xcode project settings
-          echo ""
-          echo "Xcode project code signing settings:"
-          cd ios
-          xcodebuild -project Runner.xcodeproj -target Runner -showBuildSettings 2>/dev/null | grep -E "DEVELOPMENT_TEAM|CODE_SIGN_STYLE|CODE_SIGN_IDENTITY" | head -5 || true
-          
-          TEAM_ID=$(xcodebuild -project Runner.xcodeproj -target Runner -showBuildSettings 2>/dev/null | grep "DEVELOPMENT_TEAM" | head -1 | sed 's/.*= *//' | tr -d ' ' || echo "")
-          if [ "$TEAM_ID" = "JT4YJSSV45" ]; then
-            echo "✓ DEVELOPMENT_TEAM is correctly set: $TEAM_ID"
-          else
-            echo "⚠ DEVELOPMENT_TEAM: $TEAM_ID (expected: JT4YJSSV45)"
-          fi
-          cd ..
-          
-          # Check if certificates and profiles are available
-          echo ""
-          echo "Code signing resources:"
+          # Check if certificates and profiles are available (set up by Codemagic automatically)
+          echo "Verifying code signing setup..."
           CERT_COUNT=$(security find-identity -v -p codesigning 2>/dev/null | grep -c "JT4YJSSV45" || echo "0")
           PROFILE_COUNT=$(ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | wc -l || echo "0")
           echo "Certificates in keychain: $CERT_COUNT"
           echo "Provisioning profiles: $PROFILE_COUNT"
           
           if [ "$PROFILE_COUNT" -gt "0" ]; then
+            echo ""
             echo "Available profiles:"
-            ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | head -3 | while read profile; do
-              echo "  - $(basename "$profile")"
-              # Check profile type and bundle ID
-              PROFILE_INFO=$(security cms -D -i "$profile" 2>/dev/null | grep -E "Name|ApplicationIdentifierPrefix|ProvisionedDevices" | head -3 || echo "")
-              if echo "$PROFILE_INFO" | grep -q "com.nextpital.prodoc"; then
-                echo "    ✓ Matches bundle ID"
+            ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | head -5 | while read profile; do
+              PROFILE_NAME=$(basename "$profile")
+              echo "  - $PROFILE_NAME"
+              # Check if it matches our bundle ID
+              if security cms -D -i "$profile" 2>/dev/null | grep -q "com.nextpital.prodoc"; then
+                echo "    ✓ Matches bundle ID com.nextpital.prodoc"
               fi
             done
-          else
-            echo "⚠ No provisioning profiles found yet - they may be created during build"
           fi
+          
+          # Verify Xcode project settings
+          echo ""
+          echo "Xcode project code signing settings:"
+          cd ios
+          TEAM_ID=$(xcodebuild -project Runner.xcodeproj -target Runner -showBuildSettings 2>/dev/null | grep "DEVELOPMENT_TEAM" | head -1 | sed 's/.*= *//' | tr -d ' ' || echo "")
+          CODE_SIGN_STYLE=$(xcodebuild -project Runner.xcodeproj -target Runner -showBuildSettings 2>/dev/null | grep "CODE_SIGN_STYLE" | head -1 | sed 's/.*= *//' | tr -d ' ' || echo "")
+          
+          if [ "$TEAM_ID" = "JT4YJSSV45" ]; then
+            echo "✓ DEVELOPMENT_TEAM is correctly set: $TEAM_ID"
+          else
+            echo "⚠ DEVELOPMENT_TEAM: $TEAM_ID (expected: JT4YJSSV45)"
+          fi
+          
+          if [ "$CODE_SIGN_STYLE" = "Automatic" ]; then
+            echo "✓ CODE_SIGN_STYLE: Automatic"
+          else
+            echo "⚠ CODE_SIGN_STYLE: $CODE_SIGN_STYLE"
+          fi
+          cd ..
           
           echo ""
           echo "Code signing setup completed."
-          
-          # Final check - if no certificates found, provide guidance
-          FINAL_CERT_COUNT=$(security find-identity -v -p codesigning 2>/dev/null | grep -c "JT4YJSSV45" || echo "0")
-          if [ "$FINAL_CERT_COUNT" -eq "0" ]; then
-            echo ""
-            echo "=========================================="
-            echo "⚠ CODE SIGNING SETUP ISSUE DETECTED"
-            echo "=========================================="
-            echo "No certificates found for team JT4YJSSV45"
-            echo ""
-            echo "Possible solutions:"
-            echo "1. Verify API key permissions in App Store Connect:"
-            echo "   - Go to App Store Connect → Users and Access → Keys"
-            echo "   - Check that your API key has 'Admin' access"
-            echo "   - Ensure it has 'Certificate Management' permission"
-            echo ""
-            echo "2. Verify bundle ID exists in App Store Connect:"
-            echo "   - Go to App Store Connect → My Apps"
-            echo "   - Ensure app with bundle ID 'com.nextpital.prodoc' exists"
-            echo ""
-            echo "3. Manual certificate upload (alternative):"
-            echo "   - Go to Codemagic UI → Your App → Code signing"
-            echo "   - Upload certificates and profiles manually"
-            echo ""
-            echo "4. Check Codemagic integration:"
-            echo "   - Go to Codemagic UI → Integrations → App Store Connect"
-            echo "   - Verify 'myappkey_admin_forcodemajic' is correctly configured"
-            echo "=========================================="
-          fi
-          echo ""
+          echo "Codemagic will use automatic code signing during the build."
+          echo "=========================================="
           
       - name: Clean iOS build
         script: |
@@ -477,11 +403,49 @@ workflows:
           security find-identity -v -p codesigning 2>/dev/null | grep "JT4YJSSV45" || echo "No certificates found for team JT4YJSSV45"
           
           # Build using flutter build ipa with release mode
-          # Codemagic should handle code signing automatically via the App Store Connect API key
-          # The export options will be generated automatically by Codemagic
+          # We need to ensure export options use App Store method (not Development)
           echo ""
-          echo "Starting Flutter build..."
-          flutter build ipa --release 2>&1 | tee /tmp/flutter_build.log || BUILD_FAILED=1
+          echo "Creating export options for App Store distribution..."
+          
+          # Create export options plist for App Store distribution
+          cat > /tmp/export_options.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>app-store</string>
+    <key>teamID</key>
+    <string>JT4YJSSV45</string>
+    <key>signingStyle</key>
+    <string>automatic</string>
+    <key>uploadBitcode</key>
+    <false/>
+    <key>uploadSymbols</key>
+    <true/>
+</dict>
+</plist>
+EOF
+          
+          echo "Export options created:"
+          cat /tmp/export_options.plist
+          echo ""
+          
+          # Verify Xcode project is configured for Release builds
+          echo "Verifying Xcode project configuration..."
+          cd ios
+          CONFIGURATION=$(xcodebuild -project Runner.xcodeproj -target Runner -showBuildSettings 2>/dev/null | grep "CONFIGURATION" | head -1 | sed 's/.*= *//' | tr -d ' ' || echo "")
+          if [ "$CONFIGURATION" != "Release" ]; then
+            echo "⚠ Warning: Build configuration is '$CONFIGURATION' (expected: Release)"
+            echo "  Flutter build ipa should use Release, but Xcode might be using different config"
+          else
+            echo "✓ Build configuration: Release"
+          fi
+          cd ..
+          echo ""
+          
+          echo "Starting Flutter build with App Store export options..."
+          flutter build ipa --release --export-options-plist /tmp/export_options.plist 2>&1 | tee /tmp/flutter_build.log || BUILD_FAILED=1
           
           # If build failed, try to create files and retry once
           if [ "${BUILD_FAILED:-0}" = "1" ]; then
@@ -489,7 +453,7 @@ workflows:
               echo "Privacy manifest error detected, creating files in all locations and retrying..."
               create_privacy_manifests
               sleep 2
-              flutter build ipa --release 2>&1 | tee /tmp/flutter_build.log || BUILD_FAILED=1
+              flutter build ipa --release --export-options-plist /tmp/export_options.plist 2>&1 | tee /tmp/flutter_build.log || BUILD_FAILED=1
             fi
           fi
           
@@ -499,7 +463,7 @@ workflows:
             /tmp/create_privacy_manifests.sh
             # Small delay to ensure files are written
             sleep 2
-            flutter build ipa --release 2>&1 | tee /tmp/flutter_build.log || BUILD_FAILED=1
+            flutter build ipa --release --export-options-plist /tmp/export_options.plist 2>&1 | tee /tmp/flutter_build.log || BUILD_FAILED=1
           fi
             
           if [ "$BUILD_FAILED" = "1" ]; then
