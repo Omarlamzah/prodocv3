@@ -11,12 +11,16 @@ workflows:
       # CodeMagic will automatically use it for code signing
     
     # Integrations - required for App Store Connect publishing and code signing
-    # Option 1: Use App Store Connect API key (automatic code signing)
-    # Option 2: Upload certificates manually via Codemagic UI (Settings → Code signing)
-    #           If you upload .p12 certificate and .mobileprovision profile manually,
-    #           Codemagic will use those instead of fetching via API key
+    # NEW API KEY (with Admin access and Certificate Management):
+    # - Key ID: 2R56FU2DCS
+    # - Issuer ID: 24e51026-b46d-49ab-89ba-d7791751dfd5
+    # - Access: Admin ✅
+    # - Private Key: AuthKey_2R56FU2DCS.p8
+    #
+    # IMPORTANT: Upload the .p8 file to Codemagic UI → Integrations → App Store Connect
+    #            Name the integration: "prodoc_api_key_admin" (or update the name below)
     integrations:
-      app_store_connect: myappkey_admin_forcodemajic  # References the API key configured in Codemagic UI (Key: 87FW8F4TSV, Access: Admin)
+      app_store_connect: prodoc_api_key_admin  # NEW API key with Admin access (Key: 2R56FU2DCS)
         
     # Cache configuration
     cache:
@@ -34,71 +38,149 @@ workflows:
     scripts:
       - name: Set up code signing
         script: |
-          # Codemagic automatically handles code signing using the App Store Connect API key
-          # Since you don't have a Mac, we rely on Codemagic's automatic code signing
-          # The certificate was created by API key, so Codemagic should be able to fetch it
+          # IMPORTANT: Since automatic code signing via API key isn't working,
+          # we need to use manual code signing via Codemagic UI
+          # 
+          # TO FIX CODE SIGNING:
+          # 1. Get the .p12 certificate file from someone with a Mac
+          # 2. Go to Codemagic UI → Your App → Settings → Code signing
+          # 3. Upload: .p12 certificate + .mobileprovision profile
+          #
+          # For now, we'll try to work with what Codemagic provides automatically
           echo "=========================================="
-          echo "Setting up code signing (automatic via API key)..."
+          echo "Code Signing Setup (API Key Method)"
           echo "=========================================="
           echo "Team ID: JT4YJSSV45"
           echo "Bundle ID: com.nextpital.prodoc"
-          echo "API Key Integration: myappkey_admin_forcodemajic"
-          echo ""
-          echo "Note: Codemagic will automatically fetch certificates and profiles"
-          echo "      using the App Store Connect API key configured in integrations."
+          echo "API Key Integration: prodoc_api_key_admin"
+          echo "API Key ID: 2R56FU2DCS (NEW - Admin access)"
           echo ""
           
-          # Codemagic automatically runs these steps before our scripts:
-          # 1. keychain initialize
-          # 2. app-store-connect fetch-signing-files (automatic)
-          # 3. keychain add-certificates (automatic)
-          #
-          # We just need to verify everything is set up correctly
+          # Check if API key environment variables are available
+          echo "Checking API key configuration..."
+          if [ -n "$APP_STORE_CONNECT_API_KEY_ID" ]; then
+            echo "✓ APP_STORE_CONNECT_API_KEY_ID: $APP_STORE_CONNECT_API_KEY_ID"
+          else
+            echo "⚠ APP_STORE_CONNECT_API_KEY_ID not set"
+          fi
           
-          # Check if certificates and profiles are available (set up by Codemagic automatically)
-          echo "Verifying code signing setup..."
-          CERT_COUNT=$(security find-identity -v -p codesigning 2>/dev/null | grep -c "JT4YJSSV45" || echo "0")
-          PROFILE_COUNT=$(ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | wc -l || echo "0")
-          echo "Certificates in keychain: $CERT_COUNT"
-          echo "Provisioning profiles: $PROFILE_COUNT"
+          if [ -n "$APP_STORE_CONNECT_ISSUER_ID" ]; then
+            echo "✓ APP_STORE_CONNECT_ISSUER_ID: $APP_STORE_CONNECT_ISSUER_ID"
+          else
+            echo "⚠ APP_STORE_CONNECT_ISSUER_ID not set"
+          fi
           
-          if [ "$PROFILE_COUNT" -gt "0" ]; then
-            echo ""
-            echo "Available profiles:"
-            ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | head -5 | while read profile; do
-              PROFILE_NAME=$(basename "$profile")
-              echo "  - $PROFILE_NAME"
-              # Check if it matches our bundle ID
-              if security cms -D -i "$profile" 2>/dev/null | grep -q "com.nextpital.prodoc"; then
-                echo "    ✓ Matches bundle ID com.nextpital.prodoc"
+          if [ -n "$APP_STORE_CONNECT_API_KEY" ]; then
+            echo "✓ APP_STORE_CONNECT_API_KEY is set (private key)"
+          else
+            echo "⚠ APP_STORE_CONNECT_API_KEY not set (private key missing)"
+            echo "  This means the .p8 private key file is not uploaded to Codemagic"
+            echo "  Go to: Codemagic UI → Integrations → App Store Connect"
+            echo "  Upload the .p8 private key file"
+          fi
+          echo ""
+          
+          # Initialize keychain
+          echo "Initializing keychain..."
+          keychain initialize
+          
+          # Try to fetch signing files (may not work if API key doesn't have permissions)
+          echo "Attempting to fetch signing files from App Store Connect..."
+          echo "This should work since your certificate was created by API key..."
+          
+          # Try multiple times with different approaches
+          app-store-connect fetch-signing-files com.nextpital.prodoc \
+            --type IOS_APP_STORE \
+            --create \
+            --platform IOS 2>&1 | tee /tmp/fetch_signing.log || {
+            echo "⚠ First attempt failed, trying alternative method..."
+            
+            # Try without --create flag (in case profile already exists)
+            app-store-connect fetch-signing-files com.nextpital.prodoc \
+              --type IOS_APP_STORE \
+              --platform IOS 2>&1 | tee -a /tmp/fetch_signing.log || {
+              echo "⚠ Alternative method also failed"
+              echo "Checking log for details:"
+              tail -30 /tmp/fetch_signing.log || true
+            }
+          }
+          
+          # Add any certificates that were fetched
+          echo ""
+          echo "Adding certificates to keychain..."
+          keychain add-certificates 2>&1 | tee /tmp/add_certs.log || {
+            echo "⚠ keychain add-certificates had issues"
+            echo "Checking certificate files location:"
+            ls -la ~/Library/MobileDevice/Certificates/ 2>/dev/null || echo "No certificate files found"
+          }
+          
+          # Also try to manually install any .p12 files if they exist
+          if [ -d ~/Library/MobileDevice/Certificates ]; then
+            echo "Checking for certificate files to install..."
+            for cert_file in ~/Library/MobileDevice/Certificates/*.p12; do
+              if [ -f "$cert_file" ]; then
+                echo "Found certificate file: $cert_file"
+                # Try to import it (may need password, but worth trying)
+                security import "$cert_file" -k ~/Library/Keychains/login.keychain-db -T /usr/bin/codesign 2>&1 || true
               fi
             done
           fi
           
-          # Verify Xcode project settings
+          # Check what we have
           echo ""
-          echo "Xcode project code signing settings:"
-          cd ios
-          TEAM_ID=$(xcodebuild -project Runner.xcodeproj -target Runner -showBuildSettings 2>/dev/null | grep "DEVELOPMENT_TEAM" | head -1 | sed 's/.*= *//' | tr -d ' ' || echo "")
-          CODE_SIGN_STYLE=$(xcodebuild -project Runner.xcodeproj -target Runner -showBuildSettings 2>/dev/null | grep "CODE_SIGN_STYLE" | head -1 | sed 's/.*= *//' | tr -d ' ' || echo "")
+          echo "Code signing resources:"
+          CERT_COUNT=$(security find-identity -v -p codesigning 2>/dev/null | grep -c "JT4YJSSV45" || echo "0")
+          PROFILE_COUNT=$(ls -1 ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null | wc -l || echo "0")
+          echo "Certificates: $CERT_COUNT"
+          echo "Profiles: $PROFILE_COUNT"
           
-          if [ "$TEAM_ID" = "JT4YJSSV45" ]; then
-            echo "✓ DEVELOPMENT_TEAM is correctly set: $TEAM_ID"
+          if [ "$CERT_COUNT" -eq "0" ] || [ "$PROFILE_COUNT" -eq "0" ]; then
+            echo ""
+            echo "=========================================="
+            echo "⚠ CODE SIGNING SETUP FAILED"
+            echo "=========================================="
+            echo "No certificates or profiles found after API key fetch attempt."
+            echo ""
+            echo "DIAGNOSTICS:"
+            echo "  Certificates found: $CERT_COUNT"
+            echo "  Profiles found: $PROFILE_COUNT"
+            echo ""
+            echo "POSSIBLE CAUSES:"
+            echo "  1. API key doesn't have 'Certificate Management' permission"
+            echo "  2. API key private key (.p8) not uploaded to Codemagic"
+            echo "  3. Bundle ID 'com.nextpital.prodoc' doesn't exist in App Store Connect"
+            echo "  4. API key integration not properly configured in Codemagic"
+            echo ""
+            echo "CHECK THESE:"
+            echo "  1. App Store Connect → Users and Access → Keys"
+            echo "     - Verify API key has 'Certificate Management' permission"
+            echo "  2. Codemagic UI → Integrations → App Store Connect"
+            echo "     - Verify integration is active"
+            echo "     - Verify .p8 private key is uploaded"
+            echo "  3. App Store Connect → My Apps"
+            echo "     - Verify app with bundle ID 'com.nextpital.prodoc' exists"
+            echo ""
+            echo "ALTERNATIVE SOLUTION (if API key can't be fixed):"
+            echo "  Upload certificates manually in Codemagic UI:"
+            echo "  1. Get .p12 file from Mac (see NO_MAC_SOLUTIONS.md)"
+            echo "  2. Codemagic UI → prodocv3 → Settings → Code signing"
+            echo "  3. Upload .p12 + .mobileprovision files"
+            echo ""
+            echo "See FIX_API_KEY_STEPS.md for detailed troubleshooting"
+            echo "=========================================="
           else
-            echo "⚠ DEVELOPMENT_TEAM: $TEAM_ID (expected: JT4YJSSV45)"
+            echo ""
+            echo "=========================================="
+            echo "✓ CODE SIGNING SETUP SUCCESSFUL"
+            echo "=========================================="
+            echo "Certificates: $CERT_COUNT"
+            echo "Profiles: $PROFILE_COUNT"
+            echo ""
+            echo "Code signing should work during the build!"
+            echo "=========================================="
           fi
           
-          if [ "$CODE_SIGN_STYLE" = "Automatic" ]; then
-            echo "✓ CODE_SIGN_STYLE: Automatic"
-          else
-            echo "⚠ CODE_SIGN_STYLE: $CODE_SIGN_STYLE"
-          fi
-          cd ..
-          
           echo ""
-          echo "Code signing setup completed."
-          echo "Codemagic will use automatic code signing during the build."
-          echo "=========================================="
           
       - name: Clean iOS build
         script: |
