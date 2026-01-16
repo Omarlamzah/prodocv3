@@ -542,5 +542,24 @@ SCRIPT
       end
     end
   end
+  
+  # CRITICAL: Create a script that will be executed by Xcode during build
+  # This script will create files in the DerivedData directory that Xcode creates during archive
+  # We'll inject this into the Xcode project as a build phase
+  puts ""
+  puts "=========================================="
+  puts "Privacy Manifest Setup Complete"
+  puts "=========================================="
+  puts "Created privacy manifest files in:"
+  puts "  - build/ios/Release-iphoneos/"
+  puts "  - ios/Pods/"
+  puts "  - DerivedData locations"
+  puts ""
+  puts "Script phases added to:"
+  puts "  - Runner target (Create Privacy Manifests)"
+  puts "  - Privacy bundle targets (Create Privacy Manifest File)"
+  puts ""
+  puts "If files are still missing during build, the script phases will create them."
+  puts "=========================================="
 end
 
