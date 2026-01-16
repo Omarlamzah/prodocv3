@@ -402,23 +402,43 @@ echo "[Privacy] Script phase completed"
   
   # CRITICAL: Create files in DerivedData locations that Xcode will check
   # This must happen after pod install but before any build
+  # Create files in ALL possible DerivedData locations, even if they don't exist yet
   derived_data_base = File.join(Dir.home, 'Library', 'Developer', 'Xcode', 'DerivedData')
-  if File.directory?(derived_data_base) || true  # Create even if directory doesn't exist yet
-    # Create in all existing Runner-* directories
-    Dir.glob(File.join(derived_data_base, 'Runner-*')).each do |runner_dir|
-      uninstalled_dir = File.join(runner_dir, 'Build', 'Intermediates.noindex', 
-                                  'ArchiveIntermediates', 'Runner', 
-                                  'IntermediateBuildFilesPath', 'UninstalledProducts', 'iphoneos')
-      FileUtils.mkdir_p(uninstalled_dir) rescue nil
-      privacy_packages.each do |pkg|
-        bundle_dir = File.join(uninstalled_dir, "#{pkg}_privacy.bundle")
-        FileUtils.mkdir_p(bundle_dir) rescue nil
-        manifest_file = File.join(bundle_dir, "#{pkg}_privacy")
-        FileUtils.touch(manifest_file) rescue nil
-        FileUtils.chmod(0644, manifest_file) rescue nil
-        puts "  Created in DerivedData: #{manifest_file}"
-      end
+  
+  # Ensure DerivedData base directory exists
+  FileUtils.mkdir_p(derived_data_base) rescue nil
+  
+  # Create in all existing Runner-* directories
+  Dir.glob(File.join(derived_data_base, 'Runner-*')).each do |runner_dir|
+    uninstalled_dir = File.join(runner_dir, 'Build', 'Intermediates.noindex', 
+                                'ArchiveIntermediates', 'Runner', 
+                                'IntermediateBuildFilesPath', 'UninstalledProducts', 'iphoneos')
+    FileUtils.mkdir_p(uninstalled_dir) rescue nil
+    privacy_packages.each do |pkg|
+      bundle_dir = File.join(uninstalled_dir, "#{pkg}_privacy.bundle")
+      FileUtils.mkdir_p(bundle_dir) rescue nil
+      manifest_file = File.join(bundle_dir, "#{pkg}_privacy")
+      FileUtils.touch(manifest_file) rescue nil
+      FileUtils.chmod(0644, manifest_file) rescue nil
+      puts "  Created in DerivedData: #{manifest_file}"
     end
+  end
+  
+  # CRITICAL: Also create a template structure that Xcode can use
+  # This ensures files exist even if DerivedData directory structure is created during build
+  # Create in a common location that Xcode might check
+  template_uninstalled_dir = File.join(derived_data_base, 'Runner-template', 'Build', 'Intermediates.noindex', 
+                                       'ArchiveIntermediates', 'Runner', 
+                                       'IntermediateBuildFilesPath', 'UninstalledProducts', 'iphoneos')
+  FileUtils.mkdir_p(template_uninstalled_dir) rescue nil
+  privacy_packages.each do |pkg|
+    bundle_dir = File.join(template_uninstalled_dir, "#{pkg}_privacy.bundle")
+    FileUtils.mkdir_p(bundle_dir) rescue nil
+    manifest_file = File.join(bundle_dir, "#{pkg}_privacy")
+    FileUtils.touch(manifest_file) rescue nil
+    FileUtils.chmod(0644, manifest_file) rescue nil
+    puts "  Created in template: #{manifest_file}"
+  end
     
     # Also create a script that will be called during build to create files in new DerivedData dirs
     create_script = File.join(File.dirname(__FILE__), 'create_privacy_manifests_during_build.sh')
